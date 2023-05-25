@@ -46,14 +46,41 @@ class FPS:
         self._fps = fps
 
         if isinstance(fps, int):
-            self._as_float = float(fps)
+            self._numerator = int(fps)
+            self._denominator = 1
         elif isinstance(fps, str):
-            pass
+            if "/" in fps:
+                n_s, d_s = fps.split("/", maxsplit=1)
+            else:
+                n_s = fps
+                d_s = "1"
+            self._numerator = int(n_s)
+            self._denominator = int(d_s)
+
         else:
             raise TypeError("FPS must be defined exactly. Define them as int or fractional representation in a string.")
 
+        self._as_float = self._numerator / self._denominator
+
+    @property
     def as_float(self) -> float:
         return self._as_float
+
+    @property
+    def frame_time(self) -> float:
+        """
+        Frame time in seconds (float).
+        Be careful with floats and further calculations.
+        """
+        return self._denominator / self._numerator
+
+    @property
+    def numerator(self) -> int:
+        return self._numerator
+
+    @property
+    def denominator(self) -> int:
+        return self._denominator
 
     def __eq__(self, other):
         pass

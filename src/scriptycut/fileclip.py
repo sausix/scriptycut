@@ -23,16 +23,16 @@ class FileClip(Clip):
     def __init__(self, sourcefile: Pathlike,
                  video_streamindex: Optional[int] = 0,
                  audio_streamindex: Optional[int] = 0,
-                 master_format=False):
+                 master=False):
 
         """
-        :param sourcefile: Source file for the clip
+        :param sourcefile:        Source file for the clip
         :param video_streamindex: Choose a different video stream in the file.
                                   Usually 0 (the first). None: disable video
         :param audio_streamindex: Choose a different audio stream in the file.
                                   Usually 0 (the first). Multiple languages may exists.
                                   None: disable audio
-        :param master_format:     Use codecs in this file as preferred master format.
+        :param master:            Use codecs in this file as preferred master format.
                                   Can prevent unnecessary reencodings unless transformations and filters are applied.
         """
 
@@ -46,7 +46,7 @@ class FileClip(Clip):
         self._all_streams = tuple(data.get("streams", ()))
         self._video_streams = tuple(s for s in self._all_streams if s.get("codec_type", None) == "video")
         self._audio_streams = tuple(s for s in self._all_streams if s.get("codec_type", None) == "audio")
-        self._master_format = master_format
+        self._master = master
 
         # Find specified streams
         found_video = video_streamindex is not None and 0 <= video_streamindex < len(self._video_streams)
@@ -93,7 +93,7 @@ class FileClip(Clip):
     @cached_property
     def duration(self) -> float:
         # Get from format/container
-        return float(self._format.get("duration", "0."))
+        return float(self._format.get("duration", 0.))
 
     @cached_property
     def flags(self) -> Set[ClipFlags]:
@@ -108,6 +108,9 @@ class FileClip(Clip):
         if self._video_streamindex is None and self._audio_streamindex is None:
             f.add(ClipFlags.MissingResource)
 
+        if self._master:
+            f.add(ClipFlags.HasMasterClip)
+
         return f
 
     def _repr_data(self) -> str:
@@ -120,4 +123,4 @@ class FileClip(Clip):
             # If there's at least one audio stream and the first is not selected
             extra += f":a={self._audio_streamindex}"
 
-        return f"{self._sourcefile}{extra}"
+        return f"{self._master}{self._sourcefile}{extra}"

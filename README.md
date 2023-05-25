@@ -36,8 +36,10 @@ ScriptyCut definitely wants to help!
 - Filter
 - Crossfade
 - ClipSequence compare formats
+- Time markers, named, typed
 - Animation
 
 # Roadmap
 - Optional UI managing and helping with the python code.
 - Animations (+motion blur)
+- Setups for live streaming/conversion?

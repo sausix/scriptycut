@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from abc import ABCMeta, abstractmethod
-from typing import Optional, Set
+from typing import Optional, Set, Tuple, Union
 from collections.abc import Iterable, Sequence
 from functools import cached_property
 from itertools import chain
@@ -18,30 +18,32 @@ class Clip(metaclass=ABCMeta):
     Clip and their derived subclasses are always immutable!
     """
 
+    # Class constants
     RENDER_NEEDS_FRAMEINDEX = False
     RENDER_NEEDS_CLIPTIME = False
     RENDER_NEEDS_ABSTIME = False
-
     CACHE_PREF = ClipCachePref.DEPENDS_ASK_INSTANCE  # Subclasses can define a default behaviour
 
-    _ROOT_CACHE: Optional[Cache] = None
+    # Class variables
+    _root_cache: Optional[Cache] = None
 
     @classmethod
     def set_root_cache(cls, cache: Cache):
         """Defines the root cache of a Clip or a subclass for all derived classes and instances"""
-        cls._ROOT_CACHE = cache
+        cls._root_cache = cache
 
     def __init__(self, cachepref: ClipCachePref):
-        if self._ROOT_CACHE is None:
+        if self._root_cache is None:
             # Create a global cache in Clip
-            Clip._ROOT_CACHE = Cache()
+            Clip._root_cache = Cache()
 
         # self._has_video = has_video
         # self._has_audio = has_audio
         # self._duration = duration
         self._cachepref = self.CACHE_PREF if cachepref is ClipCachePref.CLASS_DEFAULT else cachepref
 
-        self.cachedir = self._ROOT_CACHE.get_item_folder(
+        # Provide unique cache name
+        self.cachedir = self._root_cache.get_item_folder(
             self.__class__.__name__,
             f"{self.av_info_str}:{self._repr_data()}"
         )
@@ -50,14 +52,17 @@ class Clip(metaclass=ABCMeta):
 
     @property
     def has_video(self) -> bool:
+        """Shorthand property if clip or a subclip has video"""
         return ClipFlags.HasVideo in self.flags
 
     @property
     def has_audio(self) -> bool:
+        """Shorthand property if clip or a subclip has audio"""
         return ClipFlags.HasAudio in self.flags
 
     @property
     def flags(self) -> Set[ClipFlags]:
+        """The clip can report his an his subclips' flags"""
         return {ClipFlags.MissingResource}
 
     @property
@@ -119,17 +124,37 @@ class Clip(metaclass=ABCMeta):
             from scriptycut.slice import Slice
             return Slice(self, item)
 
-    def transform(self, options) -> "Clip":
-        # TODO Basic transformations
-        from scriptycut.transform import Transform
-        return Transform(self, options)
+    # def transform(self, options: str) -> "Clip":
+    #     # TODO Basic transformations
+    #     from scriptycut.transform import Transform
+    #     return Transform(self, options)
 
     def overlay(self, other_clip: "Clip", options) -> "Clip":
         # TODO Overlays with clips
         from scriptycut.overlay import Overlay
         return Overlay(self, other_clip, options)
 
-    def render(self, file: Pathlike, resolution: tuple[int, int], fps: float, **encoding_kwargs):
+    def scale_fit(self,
+                  width: int = None, height: int = None,
+                  from_master=False, keep_aspect=True, center=True, custom: str = None,
+                  cachepref=ClipCachePref.DEPENDS_ASK_INSTANCE):
+        """
+        Scales and fits a Clip (or a ClipSequence equally) to a common resolution.
+        Helper/wrapper function using transform()
+        :param width:
+        :param height:
+        :param from_master: Use width and height from a containing master clip.
+        :param keep_aspect: Keep aspect ratio of clips. Add black bars.
+        :param center:
+        :param custom:
+        :param cachepref: Caching policy
+        :return:
+        """
+
+        from scriptycut.transform import ScaleFit
+        return ScaleFit(self, width, height, from_master, keep_aspect, center, custom, cachepref)
+
+    def render(self, file: Pathlike, **encoding_kwargs):
         # TODO: Render interface, format incompatibility handling
         input_args = ()
         output_args = ()
