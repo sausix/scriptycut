@@ -74,26 +74,41 @@ class Clip(metaclass=ABCMeta):
         return 0.
 
     def __len__(self):
-        """A plain Clip instance is quite useless. Most Clip subclasses represent 1 clip if not even more."""
+        """
+        A plain Clip instance is quite useless. Most Clip subclasses represent 1 clip if not even more.
+        This is not the duration or frame count!
+        """
         return 0 if type(self) is Clip else 1
 
     def __hash__(self):
         """Hash based on repr. Not safe as permanent caching key"""
         return hash(repr(self))
 
-    def __add__(self, other):
+    def __add__(self, other: "Clip"):
+        """
+        Allows simple concatenation of clips: clip1 + clip2
+        :param other: The Clip played after this one
+        """
         if not isinstance(other, Clip):
             raise TypeError("You can only add Clip instances as shorthand for concatenation.")
         return ClipSequence((self, other))
 
-    def __mul__(self, other):
-        if not isinstance(other, int):
+    def __mul__(self, count: int):
+        """
+        Allows clip repeating: this_clip * 2
+        :param count: Number of repeats og this clip.
+        """
+        # TODO: count 0 to disable?
+        if not isinstance(count, int):
             raise TypeError("You can only multiply a Clip by an integer as shorthand for looping.")
-        return RepeatClip(self, other)
+        if count < 1:
+            raise ValueError("count must be at least 1")
+        return RepeatClip(self, count)
 
     # __iter__ : subclips?
 
     def __getitem__(self, item):
+        # TODO: Get frames? Or subclips? Inconsistent to __len__
         if isinstance(item, int):
             pass  # get a frame by framenumber
 
@@ -105,14 +120,17 @@ class Clip(metaclass=ABCMeta):
             return Slice(self, item)
 
     def transform(self, options) -> "Clip":
+        # TODO Basic transformations
         from scriptycut.transform import Transform
         return Transform(self, options)
 
     def overlay(self, other_clip: "Clip", options) -> "Clip":
+        # TODO Overlays with clips
         from scriptycut.overlay import Overlay
         return Overlay(self, other_clip, options)
 
     def render(self, file: Pathlike, resolution: tuple[int, int], fps: float, **encoding_kwargs):
+        # TODO: Render interface, format incompatibility handling
         input_args = ()
         output_args = ()
 
@@ -123,12 +141,17 @@ class Clip(metaclass=ABCMeta):
 
     @abstractmethod
     def _repr_data(self) -> str:
+        """
+        Clips are immutable for caching.
+        Always reflect all settings for a subclass instance into this function.
+        """
         return "[useless empty clip]"
 
     @property
     def av_info_str(self) -> str:
+        """Quick stream present indication (if not [AV]): [A], [V], [Missing]"""
         if ClipFlags.HasVideo in self.flags and ClipFlags.HasAudio in self.flags:
-            return ""
+            return ""  # Audio + Video is default, so omit
 
         if ClipFlags.HasVideo in self.flags:
             return "[V]"
@@ -136,7 +159,7 @@ class Clip(metaclass=ABCMeta):
         if ClipFlags.HasAudio in self.flags:
             return "[A]"
 
-        return "[?]"
+        return "[Missing]"
 
     def __repr__(self):
         return f"<{self.__class__.__name__}{self.av_info_str}:{self._repr_data()}>"

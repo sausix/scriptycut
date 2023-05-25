@@ -5,9 +5,11 @@ from typing import Set
 from pathlib import Path
 from hashlib import sha256
 from enum import Enum, auto
+from logging import getLogger
 
 from scriptycut.common import Pathlike
 
+logger = getLogger(__name__)
 
 
 class ClipCachePref(Enum):
@@ -89,4 +91,4 @@ class Cache:
             try:
                 self.discard_missing()
             except Exception as e:
-                error(e)
+                logger.error()

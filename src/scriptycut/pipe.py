@@ -1,5 +1,14 @@
 # -*- coding: utf-8 -*-
 
+"""
+Still on testing.
+Pipes are easy and great on Linux to chain ffmpeg streams.
+Windows is very restricted and ffmpeg doc is not helping a lot.
+Strems via pipes should be preferred instead of writing files to disk first.
+It's easier to run multiple ffmpeg processes instead of one with endless processing commands.
+"""
+
+
 import os
 import subprocess
 

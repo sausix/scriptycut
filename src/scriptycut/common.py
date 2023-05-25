@@ -8,7 +8,6 @@ from os import environ
 
 
 Pathlike = Union[Path, str]
-FPS = Union[int, float, str]
 
 
 threads_num = int(environ.get("THREADS", "1"))
@@ -33,3 +32,28 @@ class Layer(IntFlag):
     A = auto()
     V = auto()
     AV = A + V
+
+
+class FPS:
+    """
+    Representation of a framerate (fps).
+    Floats are bad here... Avoid as input?
+
+    int: 60
+    str: "30000/1001"
+    """
+    def __init__(self, fps: Union[int, str]):
+        self._fps = fps
+
+        if isinstance(fps, int):
+            self._as_float = float(fps)
+        elif isinstance(fps, str):
+            pass
+        else:
+            raise TypeError("FPS must be defined exactly. Define them as int or fractional representation in a string.")
+
+    def as_float(self) -> float:
+        return self._as_float
+
+    def __eq__(self, other):
+        pass

@@ -1,6 +1,21 @@
 # -*- coding: utf-8 -*-
 
+"""
+Basic transformations for clips.
+Probably needed to match resolutions between clips.
+"""
+
 from scriptycut.clip import Clip
+from scriptycut.cache import ClipCachePref
+from scriptycut.clipflags import ClipFlags
+
+
+def _check_options(options: str) -> str:
+    """
+    Check if options are valid
+    """
+    return options
+
 
 # -vf scale=iw*2:ih*2:flags=neighbor -c:v libx264 -preset slow -crf 18
 class Transform(Clip):
@@ -24,18 +39,19 @@ class Transform(Clip):
         bottom= (move up)
         left= (move right)
         right= (move left)
-
     """
-    def __init__(self, clip: Clip, options):
-        if not clip.has_video:
+
+    def __init__(self, clip: Clip, options: str, cachepref=ClipCachePref.ALWAYS):
+        if not ClipFlags.HasVideo in clip.flags:
             raise RuntimeError("Transform only works for clips containing a video stream.")
 
-        self.__clip = clip
-        Clip.__init__(self, True, clip.has_audio, clip.duration)
+        self._clip = clip
+        self._options = _check_options(options)
+        Clip.__init__(self, cachepref)
 
     @property
     def clip(self) -> Clip:
-        return self.__clip
+        return self._clip
 
     def _repr_data(self) -> str:
-        return f"{self.__clip}:"
+        return f"{self._clip}:{self._options}"

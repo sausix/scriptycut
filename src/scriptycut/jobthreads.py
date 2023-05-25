@@ -1,4 +1,9 @@
 # -*- coding: utf-8 -*-
+
+"""
+Processing in ffmpeg is wrapped in external processes, which are wrapped in threads for easy monitoring.
+"""
+
 import os
 from typing import List, Optional
 from threading import Thread

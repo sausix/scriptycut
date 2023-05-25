@@ -20,10 +20,11 @@ ScriptyCut definitely wants to help!
 
 
 # ToDo
+- Encoder interface
 - resolution & fps vs. cache?
+- Handling different resolutions and fps between clips
 - Stream interface for Clip classes
 - Transitions with \_\_add__()
-- Encoder interface
 - Jupyter integration?
 - Docs and tests :-)
 - Get community, feedback and love :-)

@@ -22,6 +22,9 @@ VIDEO_CODEC = "-c:v"
 
 
 class FFtool:
+    """
+    Access to FFmpeg and their tools
+    """
     GENERAL_ARGS = "-hide_banner",
     CODECS_ARGS = "-v", "error", "-codecs"
     VERSION_ARGS = "-v", "error", "-version"
@@ -32,7 +35,7 @@ class FFtool:
         self.cmd = cmd
         res = run([self.cmd, *self.GENERAL_ARGS, *self.VERSION_ARGS], capture_output=True, timeout=5, text=True)
         if res.returncode != 0:
-            raise IOError("Version call failed.")
+            raise IOError("Version call failed. Binary missing?")
         self.version = res.stdout
 
     @cached_property
@@ -227,7 +230,8 @@ class FFMPEG(FFtool):
         """
         yuv420p yuva420p yuva422p yuv444p yuva444p yuv440p yuv422p yuv411p yuv410p bgr0 bgra yuv420p16le yuv422p16le yuv444p16le yuv444p9le yuv422p9le yuv420p9le yuv420p10le yuv422p10le yuv444p10le yuv420p12le yuv422p12le yuv444p12le yuva444p16le yuva422p16le yuva420p16le yuva444p10le yuva422p10le yuva420p10le yuva444p9le yuva422p9le yuva420p9le gray16le gray gbrp9le gbrp10le gbrp12le gbrp14le gbrap10le gbrap12le ya8 gray10le gray12le gbrp16le rgb48le gbrap16le rgba64le gray9le yuv420p14le yuv422p14le yuv444p14le yuv440p10le yuv440p12le
         """
-        return ["-vcodec ffv1"]
+        return ["-vcodec", "ffv1"]
+
 
 class FFPROBE(FFtool):
     PROBE_ARGS = "-v", "error", "-print_format", "json", "-show_format", "-show_streams", "-show_data_hash", "CRC32"
@@ -246,6 +250,10 @@ class FFPROBE(FFtool):
 
 
 class FFPLAY(FFtool):
+    """
+    Player output. Previewing clips etc.
+    """
+
     PLAY_ARGS = "-autoexit",
 
     def __init__(self, cmd=FFPLAY_CMD_DEFAULT):
