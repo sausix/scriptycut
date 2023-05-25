@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+*.log
+*.swp
+
+/.env/
+/.idea/
+
+/testmedia/*.mkv
+/testmedia/*.gif
+/testmedia/*.jpg
+/testmedia/*.wav
+/testmedia/*.mp3
