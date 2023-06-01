@@ -2,7 +2,7 @@
 
 from abc import ABCMeta, abstractmethod
 from typing import Optional, Set, Tuple, Union
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Sequence, Generator
 from functools import cached_property
 from itertools import chain
 
@@ -37,9 +37,6 @@ class Clip(metaclass=ABCMeta):
             # Create a global cache in Clip
             Clip._root_cache = Cache()
 
-        # self._has_video = has_video
-        # self._has_audio = has_audio
-        # self._duration = duration
         self._cachepref = self.CACHE_PREF if cachepref is ClipCachePref.CLASS_DEFAULT else cachepref
 
         # Provide unique cache name
@@ -78,12 +75,13 @@ class Clip(metaclass=ABCMeta):
         """
         return 0.
 
-    def __len__(self):
-        """
-        A plain Clip instance is quite useless. Most Clip subclasses represent 1 clip if not even more.
-        This is not the duration or frame count!
-        """
-        return 0 if type(self) is Clip else 1
+    # Too ambigious
+    # def __len__(self):
+    #     """
+    #     A plain Clip instance is quite useless. Most Clip subclasses represent 1 clip if not even more.
+    #     This is not the duration or frame count!
+    #     """
+    #     return 0 if type(self) is Clip else 1
 
     def __hash__(self):
         """Hash based on repr. Not safe as permanent caching key"""
@@ -101,9 +99,8 @@ class Clip(metaclass=ABCMeta):
     def __mul__(self, count: int):
         """
         Allows clip repeating: this_clip * 2
-        :param count: Number of repeats og this clip.
+        :param count: Number of repeats of this clip.
         """
-        # TODO: count 0 to disable?
         if not isinstance(count, int):
             raise TypeError("You can only multiply a Clip by an integer as shorthand for looping.")
         if count < 1:
@@ -113,7 +110,6 @@ class Clip(metaclass=ABCMeta):
     # __iter__ : subclips?
 
     def __getitem__(self, item):
-        # TODO: Get frames? Or subclips? Inconsistent to __len__
         if isinstance(item, int):
             pass  # get a frame by framenumber
 
@@ -164,6 +160,23 @@ class Clip(metaclass=ABCMeta):
         render_thread.join_if_alive()
         # -progress progressinfo.txt
 
+    def iter_sequenced_clips(self) -> Generator["Clip", None, None]:
+        """
+        Iterates all clips in sequence order as played.
+        Does yield itself if it's not a sequence.
+        :return: Generator yielding clips
+        """
+        yield self
+
+    def iter_all_clips(self) -> Generator["Clip", None, None]:
+        """
+        Iterates over all clips, including overlays, etc.
+        Basically all Clips which would normally merge into single ones.
+        Order should be: Dependencies first.
+        :return: Generator yielding all containing clips
+        """
+        yield self
+
     @abstractmethod
     def _repr_data(self) -> str:
         """
@@ -206,19 +219,25 @@ class ClipSequence(Clip):
     ffmpeg -f concat -safe 0 -i mylist.txt -c copy output.mp4
     """
 
-    def __init__(self, clips: Sequence[Clip], cachepref=ClipCachePref.DEPENDS_ASK_INSTANCE):
-        if len(clips) == 0:
+    auto_flatten = True  # Should be True by default. Else clip1 + clip2 + clip3 creates a tree structure.
+
+    def __init__(self, clips: Iterable[Clip], auto_flatten: bool = None, cachepref=ClipCachePref.DEPENDS_ASK_INSTANCE):
+        if auto_flatten or (auto_flatten is None and self.auto_flatten):
+            self._clips = tuple(self._flatten_subclips(clips))
+        else:
+            self._clips = tuple(clips)
+
+        if len(self._clips) == 0:
             raise ValueError("Empty ClipSequences are not allowed.")
 
-        self._clips = tuple(self._normalize_subclips(clips))
         Clip.__init__(self, cachepref)
 
     @staticmethod
-    def _normalize_subclips(clips: Iterable[Clip]):
+    def _flatten_subclips(clips: Iterable[Clip]):
         for clip in clips:
             if isinstance(clip, ClipSequence):
                 # Balance up
-                yield from clip
+                yield from clip._clips
             else:
                 # Just append
                 yield clip
@@ -226,17 +245,22 @@ class ClipSequence(Clip):
     @cached_property
     def flags(self) -> Set[ClipFlags]:
         clip_flags = (c.flags for c in self._clips)
-        return set().union(chain.from_iterable(clip_flags)) | {ClipFlags.HasSequence}
+        # return set().union(chain.from_iterable(clip_flags)) | {ClipFlags.HasSequence}
+        return set(chain.from_iterable(clip_flags)) | {ClipFlags.HasSequence}  # TODO: OK?
 
     @cached_property
     def duration(self) -> float:
         return sum(c.duration for c in self._clips)
 
-    def __len__(self):
-        return len(self._clips)
+    def iter_sequenced_clips(self) -> Generator[Clip, None, None]:
+        """Just resolve sequences in play order. May return the same clip multiple times."""
+        yield from chain.from_iterable(c.iter_sequenced_clips() for c in self._clips)
+        # Do not yield the sequence itself
 
-    def __iter__(self):
-        return iter(self._clips)
+    def iter_all_clips(self) -> Generator[Clip, None, None]:
+        """Resolve all subclips in sequences. May return clips multiple times."""
+        yield from chain.from_iterable(c.iter_all_clips() for c in self._clips)
+        yield self  # Yield the sequence also at last.
 
     def _repr_data(self) -> str:
         return f"⇻{self._clips}"
@@ -258,6 +282,11 @@ class RepeatClip(ClipSequence):
     @property
     def count(self) -> int:
         return self._count
+
+    def iter_all_clips(self) -> Generator[Clip, None, None]:
+        """Iter over all subclips of the repeated clip once."""
+        yield from self._clip.iter_all_clips()  # Yields self._clip already
+        yield self
 
     def _repr_data(self) -> str:
         return f"{self._count}×{self._clip!r}"

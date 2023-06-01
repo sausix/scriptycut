@@ -1,6 +1,10 @@
 # ScriptyCut
 Python based video editing tool with simplified syntax approach
 
+# Warning
+This project is still in development (by one person) and is not yet ready to use.
+I'm working on the optimal rendering method including caching.
+
 
 # For whom?
 Not only for programmers.
@@ -17,6 +21,11 @@ ScriptyCut definitely wants to help!
 - "KISAP"? - Keep it simple and pythonic.
 - No expensive processing within Python. ffmpeg's internal processing is on priority.
 - Not reinventing the wheel. External tools are perfect and keep the project's code small and clean.
+
+
+# Dependencies
+- FFmpeg. Have it installed and reachable via your PATH variable or specifiy the full path to it.
+- Optional: Numpy for raw single frame input or processing.
 
 
 # ToDo

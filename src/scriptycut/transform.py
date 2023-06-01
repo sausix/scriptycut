@@ -5,6 +5,8 @@ Basic transformations for clips.
 Probably needed to match resolutions between clips.
 """
 
+from collections.abc import Generator
+
 from scriptycut.clip import Clip
 from scriptycut.cache import ClipCachePref
 from scriptycut.clipflags import ClipFlags
@@ -60,7 +62,8 @@ def _check_options(options: str) -> str:
 
 class ScaleFit(Clip):
     """
-    Simple scaling of Clips. Especially needed to combine clips by a common resolution of sequences.
+    Simple scaling or fitting of Clips.
+    Especially needed to combine clips or ClipSequences by a common resolution of sequences.
     """
 
     def __init__(self, clip: Clip,
@@ -75,12 +78,19 @@ class ScaleFit(Clip):
 
 
         self._clip = clip
-        self._options = _check_options(options)
+        self._options = None
         Clip.__init__(self, cachepref)
 
     @property
     def clip(self) -> Clip:
         return self._clip
+
+    # def iter_sequenced_clips(self) -> Generator[Clip, None, None]:
+    #     yield from self._clip.iter_sequenced_clips()
+
+    def iter_all_clips(self) -> Generator[Clip, None, None]:
+        yield from self._clip.iter_all_clips()
+        yield self
 
     def _repr_data(self) -> str:
         return f"{self._clip}:{self._options}"

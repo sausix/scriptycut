@@ -97,7 +97,7 @@ class FileClip(Clip):
 
     @cached_property
     def flags(self) -> Set[ClipFlags]:
-        f = set()
+        f = {ClipFlags.FileResource}
 
         if self._video_streamindex is not None:
             f.add(ClipFlags.HasVideo)
@@ -123,4 +123,4 @@ class FileClip(Clip):
             # If there's at least one audio stream and the first is not selected
             extra += f":a={self._audio_streamindex}"
 
-        return f"{self._master}{self._sourcefile}{extra}"
+        return f"{'[Master]' if self._master else ''}{self._sourcefile}{extra}"

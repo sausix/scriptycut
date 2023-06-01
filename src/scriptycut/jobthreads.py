@@ -28,9 +28,9 @@ class JobThread(Thread):
         self._err_fd = err_fd
         self.close_std_fds = close_std_fds and (read_fd>=0 or write_fd>=0 or err_fd>=0)
 
-        Thread.__init__(self, target=self._job_wrapper)
+        Thread.__init__(self)
         if autorun:
-            self.run()
+            self.start()
 
     @staticmethod
     def _try_close_fd(fd) -> bool:
@@ -44,7 +44,10 @@ class JobThread(Thread):
 
         return True
 
-    def _job_wrapper(self):
+    def run(self):
+        if self in self._RUNNING_JOBS:
+            raise RuntimeError("Job already in running pool?")
+
         self._RUNNING_JOBS.append(self)
         print(f"JOB {id(self)} START:" , self.cmd)
         self.result = run(self.cmd,
@@ -57,15 +60,6 @@ class JobThread(Thread):
         if self.close_std_fds:
             for fd in self._read_fd, self._write_fd, self._err_fd:
                 self._try_close_fd(fd)
-
-    def run(self):
-        if self.is_alive():
-            raise RuntimeError("Job already running")
-
-        if self in self._RUNNING_JOBS:
-            raise RuntimeError("Job already in running pool?")
-
-        Thread.run(self)
 
     def join_if_alive(self, timeout: float = None):
         """A friendly join which checks if thread is running"""

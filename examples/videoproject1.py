@@ -3,10 +3,10 @@
 
 from scriptycut.clip import Clip
 from scriptycut.fileclip import FileClip
-from scriptycut.image import ImageFromFile, ImageClip
+from scriptycut.image import ImageFromFile, ImageClip, Image
 from scriptycut.cache import Cache
 from scriptycut.fftools import FFPLAY
-from scriptycut.transform import Transform
+# from scriptycut.transform import Transform
 from scriptycut.crossfade import Crossfade
 
 
@@ -49,22 +49,22 @@ print(video2.audio_format)  # None
 # Do some simple magic with clips
 mainvideo = video1 * 2 + video2
 
-def make_video_as_always(main: Clip) -> Clip:
+def make_video_as_always(pre_image: Image, main: Clip) -> Clip:
     """
     Helper function to compose a full video.
     Just add the main clip
     """
 
     # ToDo: Crossfades
-    # all_clips = intro + Crossfade(duration=1) + ImageClip(agenda, 2.) + main + Crossfade(duration=1) + outro
-    all_clips = intro + ImageClip(agenda, 2.) + main + outro
+    # all_clips = intro + Crossfade(duration=1) + ImageClip(pre_image, 2.) + main + Crossfade(duration=1) + outro
+    all_clips = intro + ImageClip(pre_image, 2.) + main + outro
 
     # Scale fit scales each Clip to the same resolution.
     # Let's scale to the resolution of the master clip.
     return all_clips.scale_fit(from_master=True)
 
 
-final_video = make_video_as_always(mainvideo)
+final_video = make_video_as_always(agenda, mainvideo)
 print(final_video)  # Gives repr()
 # <ClipSequence:⇻(<FileClip[?]:/home/user/intro.mpv>, <ImageClip[V]:2.0s:<ImageFromFile:/home/as/Screenshot_20201207_064554.png>>, <FileClip:/home/as/Rick Astley - Never Gonna Give You Up.mp4>, <FileClip:/home/as/Rick Astley - Never Gonna Give You Up.mp4>, <FileClip[V]:testmedia/x264-1080p60.mkv>, <FileClip[?]:outro.mpv>)>
 
@@ -72,3 +72,6 @@ final_video.render("/tmp/test.mkv")
 
 # Or scale to a specific resolution
 # final_video.scale_fit(*resolution).render("/tmp/test.mkv")
+
+for c in final_video.iter_all_clips():
+    print(c)
