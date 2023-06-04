@@ -20,8 +20,8 @@ cache = Cache("/tmp/project.cache", discard_missing=True)  # Or define a non vol
 Clip.set_root_cache(cache)
 
 # Project constants
-fps = 60  # Used as hint. All containers seem to support variable framerates
-resolution = 1920, 1080
+Clip.set_fps_hint(60)  # Used as hint. All video containers seem to support variable framerates.
+
 
 # Static sources
 intro = FileClip("/home/user/intro.mpv")  # Missing
@@ -33,9 +33,9 @@ agenda = ImageFromFile("/home/as/Screenshot_20201207_064554.png")
 # print(agenda.format)
 
 # Video files
-video1 = FileClip("/home/as/Rick Astley - Never Gonna Give You Up.mp4", master=True)
+video1 = FileClip("/home/as/Rick Sanchez - Always Gonna Give You Up.mp4", master=True)
 # master: This format will be preferred for other clips.
-print(video1)  # <FileClip:/home/as/Rick Astley - Never Gonna Give You Up.mp4>
+print(video1)  # <FileClip:/home/as/Rick Sanchez - Always Gonna Give You Up.mp4>
 print(video1.video_format)  # VideoFormat(codec_name='av1', codec_type='video', codec_tag_string='av01', profile='Main', time_base='1/12800', width=1920, height=1080, coded_width=1920, coded_height=1080, pix_fmt='yuv420p', r_frame_rate='25/1', level=8)
 print(video1.audio_format)  # AudioFormat(codec_name='aac', codec_type='audio', codec_tag_string='mp4a', profile='LC', time_base='1/44100', channels=2, channel_layout='stereo', sample_fmt='fltp', sample_rate='44100')
 
@@ -61,12 +61,12 @@ def make_video_as_always(pre_image: Image, main: Clip) -> Clip:
 
     # Scale fit scales each Clip to the same resolution.
     # Let's scale to the resolution of the master clip.
-    return all_clips.scale_fit(from_master=True)
+    return all_clips.match_formats(from_master=True)
 
 
 final_video = make_video_as_always(agenda, mainvideo)
 print(final_video)  # Gives repr()
-# <ClipSequence:⇻(<FileClip[?]:/home/user/intro.mpv>, <ImageClip[V]:2.0s:<ImageFromFile:/home/as/Screenshot_20201207_064554.png>>, <FileClip:/home/as/Rick Astley - Never Gonna Give You Up.mp4>, <FileClip:/home/as/Rick Astley - Never Gonna Give You Up.mp4>, <FileClip[V]:testmedia/x264-1080p60.mkv>, <FileClip[?]:outro.mpv>)>
+# <ClipSequence:⇻(<FileClip[?]:/home/user/intro.mpv>, <ImageClip[V]:2.0s:<ImageFromFile:/home/as/Screenshot_20201207_064554.png>>, <FileClip:/home/as/Rick Sanchez - Always Gonna Give You Up.mp4>, <FileClip:/home/as/Rick Sanchez - Always Gonna Give You Up.mp4>, <FileClip[V]:testmedia/x264-1080p60.mkv>, <FileClip[?]:outro.mpv>)>
 
 final_video.render("/tmp/test.mkv")
 
@@ -75,3 +75,4 @@ final_video.render("/tmp/test.mkv")
 
 for c in final_video.iter_all_clips():
     print(c)
+    print(c.flags)

@@ -60,7 +60,7 @@ def _check_options(options: str) -> str:
 #         return f"{self._clip}:{self._options}"
 
 
-class ScaleFit(Clip):
+class Scale(Clip):
     """
     Simple scaling or fitting of Clips.
     Especially needed to combine clips or ClipSequences by a common resolution of sequences.
@@ -68,17 +68,17 @@ class ScaleFit(Clip):
 
     def __init__(self, clip: Clip,
                  width: int = None, height: int = None,
-                 from_master=False, keep_aspect=True, center=True, custom: str = None,
+                 keep_aspect=True, center=True, custom: str = None,
                  cachepref=ClipCachePref.ALWAYS):
 
         if custom:
-            if any((width, height, from_master, keep_aspect)):
+            if any((width, height, keep_aspect)):
                 raise TypeError("When specifying 'custom', other arguments are not allowed.")
 
 
 
         self._clip = clip
-        self._options = None
+        self._options = custom if custom is not None else ""
         Clip.__init__(self, cachepref)
 
     @property

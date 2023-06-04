@@ -7,7 +7,7 @@ from functools import cached_property
 from itertools import chain
 
 from scriptycut.cache import Cache, ClipCachePref
-from scriptycut.common import Pathlike
+from scriptycut.common import Pathlike, FPS
 from scriptycut.fftools import FFMPEG
 from scriptycut.clipflags import ClipFlags
 
@@ -26,11 +26,20 @@ class Clip(metaclass=ABCMeta):
 
     # Class variables
     _root_cache: Optional[Cache] = None
+    _fps_hint: Optional[float] = None
 
     @classmethod
     def set_root_cache(cls, cache: Cache):
         """Defines the root cache of a Clip or a subclass for all derived classes and instances"""
         cls._root_cache = cache
+
+    @classmethod
+    def set_fps_hint(cls, fps_hint: float):
+        """
+        Defines a default FPS value, for generative clips.
+        FPS can vary in most container formats anyway. So just a hint if a Clip want it.
+        """
+        cls._fps_hint = fps_hint
 
     def __init__(self, cachepref: ClipCachePref):
         if self._root_cache is None:
@@ -45,7 +54,7 @@ class Clip(metaclass=ABCMeta):
             f"{self.av_info_str}:{self._repr_data()}"
         )
 
-        self._video_fps: Optional[float] = None
+        self._video_fps: Optional[FPS] = None
 
     @property
     def has_video(self) -> bool:
@@ -60,7 +69,7 @@ class Clip(metaclass=ABCMeta):
     @property
     def flags(self) -> Set[ClipFlags]:
         """The clip can report his an his subclips' flags"""
-        return {ClipFlags.MissingResource}
+        return {ClipFlags.HasMissingResources}
 
     @property
     def video_fps(self) -> Optional[float]:
@@ -89,7 +98,7 @@ class Clip(metaclass=ABCMeta):
 
     def __add__(self, other: "Clip"):
         """
-        Allows simple concatenation of clips: clip1 + clip2
+        Allows simple concatenation of clips: clip1 + clip2 + ...
         :param other: The Clip played after this one
         """
         if not isinstance(other, Clip):
@@ -106,8 +115,6 @@ class Clip(metaclass=ABCMeta):
         if count < 1:
             raise ValueError("count must be at least 1")
         return RepeatClip(self, count)
-
-    # __iter__ : subclips?
 
     def __getitem__(self, item):
         if isinstance(item, int):
@@ -130,16 +137,15 @@ class Clip(metaclass=ABCMeta):
         from scriptycut.overlay import Overlay
         return Overlay(self, other_clip, options)
 
-    def scale_fit(self,
-                  width: int = None, height: int = None,
-                  from_master=False, keep_aspect=True, center=True, custom: str = None,
-                  cachepref=ClipCachePref.DEPENDS_ASK_INSTANCE):
+    def scale(self,
+              width: int = None, height: int = None,
+              keep_aspect=True, center=True, custom: str = None,
+              cachepref=ClipCachePref.DEPENDS_ASK_INSTANCE):
         """
-        Scales and fits a Clip (or a ClipSequence equally) to a common resolution.
+        Scales a Clip.
         Helper/wrapper function using transform()
         :param width:
         :param height:
-        :param from_master: Use width and height from a containing master clip.
         :param keep_aspect: Keep aspect ratio of clips. Add black bars.
         :param center:
         :param custom:
@@ -147,8 +153,8 @@ class Clip(metaclass=ABCMeta):
         :return:
         """
 
-        from scriptycut.transform import ScaleFit
-        return ScaleFit(self, width, height, from_master, keep_aspect, center, custom, cachepref)
+        from scriptycut.transform import Scale
+        return Scale(self, width, height, keep_aspect, center, custom, cachepref)
 
     def render(self, file: Pathlike, **encoding_kwargs):
         # TODO: Render interface, format incompatibility handling
@@ -245,12 +251,33 @@ class ClipSequence(Clip):
     @cached_property
     def flags(self) -> Set[ClipFlags]:
         clip_flags = (c.flags for c in self._clips)
-        # return set().union(chain.from_iterable(clip_flags)) | {ClipFlags.HasSequence}
         return set(chain.from_iterable(clip_flags)) | {ClipFlags.HasSequence}  # TODO: OK?
 
     @cached_property
     def duration(self) -> float:
         return sum(c.duration for c in self._clips)
+
+    def match_formats(self,
+                      width: int = None, height: int = None,
+                      from_master=False, keep_aspect=True, center=True, custom: str = None,
+                      cachepref=ClipCachePref.DEPENDS_ASK_INSTANCE):
+        """
+        Scales and fits a ClipSequence equally to a common resolution.
+        Helper/wrapper function using transform()
+        :param width:
+        :param height:
+        :param from_master: Use width and height from a containing master clip.
+        :param keep_aspect: Keep aspect ratio of clips. Add black bars.
+        :param center:
+        :param custom:
+        :param cachepref: Caching policy
+        :return:
+        """
+
+        from scriptycut.transform import ScaleFit
+        # ToDo: Return new ClipSequence with having each a Scale applied
+        return ScaleFit(self, width, height, from_master, keep_aspect, center, custom, cachepref)
+
 
     def iter_sequenced_clips(self) -> Generator[Clip, None, None]:
         """Just resolve sequences in play order. May return the same clip multiple times."""
