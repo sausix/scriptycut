@@ -19,8 +19,9 @@ cache = Cache("/tmp/project.cache", discard_missing=True)  # Or define a non vol
 # Assign the cache to the base class for all clips
 Clip.set_root_cache(cache)
 
-# Project constants
-Clip.set_fps_hint(60)  # Used as hint. All video containers seem to support variable framerates.
+# Used as hint. All video containers seem to support variable framerates.
+# Some Clips may generate Frames and just need a hint.
+Clip.set_fps_hint(60)
 
 
 # Static sources
@@ -61,7 +62,7 @@ def make_video_as_always(pre_image: Image, main: Clip) -> Clip:
 
     # Scale fit scales each Clip to the same resolution.
     # Let's scale to the resolution of the master clip.
-    return all_clips.match_formats(from_master=True)
+    return all_clips.match_resolutions(from_master=True)
 
 
 final_video = make_video_as_always(agenda, mainvideo)
@@ -72,7 +73,3 @@ final_video.render("/tmp/test.mkv")
 
 # Or scale to a specific resolution
 # final_video.scale_fit(*resolution).render("/tmp/test.mkv")
-
-for c in final_video.iter_all_clips():
-    print(c)
-    print(c.flags)

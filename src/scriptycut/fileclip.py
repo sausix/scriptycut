@@ -97,7 +97,7 @@ class FileClip(Clip):
 
     @cached_property
     def flags(self) -> Set[ClipFlags]:
-        f = {ClipFlags.FileResource}
+        f = {ClipFlags.FromFileResource, ClipFlags.HasDefinedFormat}
 
         if self._video_streamindex is not None:
             f.add(ClipFlags.HasVideo)
@@ -106,10 +106,11 @@ class FileClip(Clip):
             f.add(ClipFlags.HasAudio)
 
         if self._video_streamindex is None and self._audio_streamindex is None:
-            f.add(ClipFlags.MissingResource)
+            f.add(ClipFlags.HasMissingResources)
 
         if self._master:
-            f.add(ClipFlags.HasMasterClip)
+            f.add(ClipFlags.ContainsMasterClip)
+            f.add(ClipFlags.IsMasterClip)
 
         return f
 

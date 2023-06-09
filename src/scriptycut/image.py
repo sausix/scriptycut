@@ -3,7 +3,7 @@
 from collections.abc import Iterable
 from pathlib import Path
 from hashlib import sha256
-from typing import Set
+from typing import Set, Tuple, Optional
 from functools import cached_property
 
 from numpy import ndarray
@@ -17,36 +17,39 @@ from scriptycut.clipflags import ClipFlags
 
 class Image:
     def __init__(self, data: ndarray, pixel_format):
-        self.__data = data
-        self.__shape = data.shape
-        self.__format = pixel_format or {}
+        self._data = data
+        self._shape = data.shape
+        self._format = pixel_format or {}
 
         # Hash the raw data to ensure immutability
         self._hash = "sha256=" + sha256(data.data).digest().hex()  # Hash the data
 
     def export_to_file(self, file: Pathlike):
         with iio.imopen(file, "w") as file:
-            file.write(self.__data)
+            file.write(self._data)
 
     @property
     def data(self) -> ndarray:
-        return self.__data
+        return self._data
 
     @property
-    def data_shape(self) -> tuple:
-        return self.__shape
+    def data_shape(self) -> Tuple:
+        return self._shape
 
     @property
     def format(self):
-        return self.__format
+        return self._format
 
     @property
-    def size(self) -> tuple:
-        return self.__format.get("shape", (0, 0))
+    def size(self) -> Tuple[int, int]:
+        return self._format.get("shape", (0, 0))
 
     @property
     def mode(self) -> str:
-        return self.__format.get("mode", "")
+        return self._format.get("mode", "")
+
+    def __hash__(self):
+        return
 
     def __repr__(self):
         return f"<{self.__class__.__name__}:{self._hash}>"
@@ -54,19 +57,19 @@ class Image:
 
 class ImageFromFile(Image):
     def __init__(self, imagefile: Pathlike):
-        self.__sourcefile = Path(imagefile)
+        self._sourcefile = Path(imagefile)
 
-        with iio.imopen(self.__sourcefile, "r") as file:
+        with iio.imopen(self._sourcefile, "r") as file:
             # print(file, dir(file))
             imagedata = file.read()
             Image.__init__(self, imagedata, file.metadata())
 
     @property
     def sourcefile(self) -> Path:
-        return self.__sourcefile
+        return self._sourcefile
 
     def __repr__(self):
-        return f"<{self.__class__.__name__}:{self.__sourcefile}>"
+        return f"<{self.__class__.__name__}:{self._sourcefile}>"
 
 
 class ImageClip(Clip):
@@ -84,11 +87,14 @@ class ImageClip(Clip):
 
     @property
     def flags(self) -> Set[ClipFlags]:
-        return {ClipFlags.HasVideo}
+        return {ClipFlags.HasVideo, ClipFlags.FromFileResource}
 
     @cached_property
     def duration(self) -> float:
         return self._duration
+
+    def video_resolution(self) -> Optional[Tuple[int, int]]:
+        return self._image.size
 
     def _repr_data(self) -> str:
         return f"{self._duration}s:{self._image!r}"

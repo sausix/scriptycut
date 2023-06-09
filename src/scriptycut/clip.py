@@ -5,11 +5,14 @@ from typing import Optional, Set, Tuple, Union
 from collections.abc import Iterable, Sequence, Generator
 from functools import cached_property
 from itertools import chain
+import logging
 
 from scriptycut.cache import Cache, ClipCachePref
 from scriptycut.common import Pathlike, FPS
 from scriptycut.fftools import FFMPEG
 from scriptycut.clipflags import ClipFlags
+
+logger = logging.getLogger('scriptycut')
 
 
 class Clip(metaclass=ABCMeta):
@@ -26,7 +29,7 @@ class Clip(metaclass=ABCMeta):
 
     # Class variables
     _root_cache: Optional[Cache] = None
-    _fps_hint: Optional[float] = None
+    _fps_hint: Optional[FPS] = None
 
     @classmethod
     def set_root_cache(cls, cache: Cache):
@@ -34,12 +37,16 @@ class Clip(metaclass=ABCMeta):
         cls._root_cache = cache
 
     @classmethod
-    def set_fps_hint(cls, fps_hint: float):
+    def set_fps_hint(cls, fps_hint: Union[str, int, FPS]):
         """
         Defines a default FPS value, for generative clips.
         FPS can vary in most container formats anyway. So just a hint if a Clip want it.
         """
-        cls._fps_hint = fps_hint
+
+        if isinstance(fps_hint, FPS):
+            cls._fps_hint = fps_hint
+        else:
+            cls._fps_hint = FPS(fps_hint)
 
     def __init__(self, cachepref: ClipCachePref):
         if self._root_cache is None:
@@ -72,7 +79,7 @@ class Clip(metaclass=ABCMeta):
         return {ClipFlags.HasMissingResources}
 
     @property
-    def video_fps(self) -> Optional[float]:
+    def video_fps(self) -> Optional[FPS]:
         return self._video_fps
 
     @property
@@ -83,6 +90,14 @@ class Clip(metaclass=ABCMeta):
         :return: Length of the Clip in seconds
         """
         return 0.
+
+    @property
+    def video_resolution(self) -> Optional[Tuple[int, int]]:
+        """
+        Returns a resolution if known by Clip
+        :return: tuple(width, height)
+        """
+        return None
 
     # Too ambigious
     # def __len__(self):
@@ -117,6 +132,7 @@ class Clip(metaclass=ABCMeta):
         return RepeatClip(self, count)
 
     def __getitem__(self, item):
+        # TODO Rethink?
         if isinstance(item, int):
             pass  # get a frame by framenumber
 
@@ -191,6 +207,15 @@ class Clip(metaclass=ABCMeta):
         """
         return "[useless empty clip]"
 
+    def log(self, msg):
+        pass
+
+    def warn(self, msg):
+        pass
+
+    def err(self, msg):
+        pass
+
     @property
     def av_info_str(self) -> str:
         """Quick stream present indication (if not [AV]): [A], [V], [Missing]"""
@@ -250,17 +275,16 @@ class ClipSequence(Clip):
 
     @cached_property
     def flags(self) -> Set[ClipFlags]:
-        clip_flags = (c.flags for c in self._clips)
-        return set(chain.from_iterable(clip_flags)) | {ClipFlags.HasSequence}  # TODO: OK?
+        return ClipFlags.merge_from_clips(self._clips, append=ClipFlags.HasSequence)
 
     @cached_property
     def duration(self) -> float:
         return sum(c.duration for c in self._clips)
 
-    def match_formats(self,
-                      width: int = None, height: int = None,
-                      from_master=False, keep_aspect=True, center=True, custom: str = None,
-                      cachepref=ClipCachePref.DEPENDS_ASK_INSTANCE):
+    def match_resolutions(self,
+                          width: int = None, height: int = None,
+                          from_master=False, keep_aspect=True, center=True, custom: str = None,
+                          cachepref=ClipCachePref.DEPENDS_ASK_INSTANCE):
         """
         Scales and fits a ClipSequence equally to a common resolution.
         Helper/wrapper function using transform()
@@ -274,10 +298,24 @@ class ClipSequence(Clip):
         :return:
         """
 
-        from scriptycut.transform import ScaleFit
-        # ToDo: Return new ClipSequence with having each a Scale applied
-        return ScaleFit(self, width, height, from_master, keep_aspect, center, custom, cachepref)
+        if from_master:
+            if ClipFlags.ContainsMasterClip not in self.flags:
+                raise RuntimeError("from_master requires one subclip clip to be flagged as master.")
 
+            master_clips = tuple(c for c in self.iter_sequenced_clips() if ClipFlags.IsMasterClip)
+            if not master_clips:
+
+
+        from scriptycut.transform import Scale
+
+        scaled_clips = []
+        for c in self.iter_sequenced_clips():
+            if not c.has_video:
+                # No video to scale
+                scaled_clips.append(c)
+
+
+        return ClipSequence(scaled_clips, auto_flatten=False, cachepref=cachepref)
 
     def iter_sequenced_clips(self) -> Generator[Clip, None, None]:
         """Just resolve sequences in play order. May return the same clip multiple times."""

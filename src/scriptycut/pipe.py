@@ -57,7 +57,7 @@ class Pipe:
 
 
 
-# Linux send via stdout, conneted to a pipe
+# Linux send via stdout, connected to a pipe
 # r, w = os.pipe()
 p = Pipe()
 r, w = p.get_fds()

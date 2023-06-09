@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from enum import Enum, auto
-from typing import Set, Iterable
+from typing import Set, Iterable, Union
 from itertools import chain
 
 
@@ -16,10 +16,8 @@ class ClipFlags(Enum):
     HasAudio = auto()  # Clip or at least one subclip has an audio stream
     HasAlpha = auto()
     FromFileResource = auto()  # Clip or a subclip reads directly from a file
-    HasFixFPS = auto()
-    HasFixResolution = auto()
     IsMasterClip = auto()  # Clip is marked as master. Prefer its format for rendering.
-
+    HasDefinedFormat = auto()  # Clip has a preferred format (from file etc)
 
     # Inherit from subclips
     ContainsMasterClip = auto()  # Clip or a subclip is marked as master. Prefer its format for rendering.
@@ -28,8 +26,9 @@ class ClipFlags(Enum):
 
     @classmethod
     def merge_from_clips(cls, *clips,
-                         include: Iterable["ClipFlags"] = None, exclude: Iterable["ClipFlags"] = None,
-                         append: Iterable["ClipFlags"] = None) -> Set:
+                         include: Union[Iterable["ClipFlags"], "ClipFlags"] = None,
+                         exclude: Union[Iterable["ClipFlags"], "ClipFlags"] = None,
+                         append: Union[Iterable["ClipFlags"], "ClipFlags"] = None) -> Set:
         if include and exclude:
             raise RuntimeError("Including and excluding at the same time is not logical.")
 
@@ -46,11 +45,29 @@ class ClipFlags(Enum):
         clip_flags = (c.flags for c in unpack_clips(clips))
         merged = set(chain.from_iterable(clip_flags))
 
+        if append:
+            if isinstance(append, ClipFlags):
+                append_set = {append}
+            else:
+                append_set = set(append)
+        else:
+            append_set = set()
+
         if include is not None:
-            merged = merged.intersection(include)
+            if isinstance(include, ClipFlags):
+                merged.discard(include)
+            else:
+                merged.intersection_update(include)
 
         if exclude is not None:
-            merged = merged.difference(exclude)
+            if isinstance(exclude, ClipFlags):
+                exclude_set = {exclude}
+            else:
+                exclude_set = set(exclude)
 
+            if append_set.intersection(exclude_set):
+                raise RuntimeError("You can't exclude and append the same items.")
 
-        return merged
+            merged.difference_update(exclude_set)
+
+        return merged.union(append_set)
