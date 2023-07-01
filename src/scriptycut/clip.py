@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
 
+import logging
 from abc import ABCMeta, abstractmethod
-from typing import Optional, Set, Tuple, Union
+from typing import Optional, Set, Tuple, Union, Dict
 from collections.abc import Iterable, Sequence, Generator
 from functools import cached_property
 from itertools import chain
-import logging
+from pathlib import Path
 
-from scriptycut.cache import Cache, ClipCachePref
-from scriptycut.common import Pathlike, FPS
-from scriptycut.fftools import FFMPEG
+from scriptycut.cache import Cache
+from scriptycut.common import Pathlike, FPS, Layer
+from scriptycut.fftools import FFMPEG, FFargs
 from scriptycut.clipflags import ClipFlags
 
 logger = logging.getLogger('scriptycut')
@@ -21,15 +22,20 @@ class Clip(metaclass=ABCMeta):
     Clip and their derived subclasses are always immutable!
     """
 
-    # Class constants
-    RENDER_NEEDS_FRAMEINDEX = False
-    RENDER_NEEDS_CLIPTIME = False
-    RENDER_NEEDS_ABSTIME = False
-    CACHE_PREF = ClipCachePref.DEPENDS_ASK_INSTANCE  # Subclasses can define a default behaviour
+    # Heavy processing should be cached especially on multiple renders
+    CACHE_ENABLE = True  # Disable when caching is really unnecessary (direct reading from file at least)
+    CACHE_BY_BACKEND = True  # If CACHE_ENABLE = True), the backend will automatically
+                             # take care of creating and offering a cache file
+
+    # By default, streams are consistent with the input options.
+    # Set to True on random based streams, live streams, cam/mic inputs, variable lengths etc.
+    INCONSISTENT_STREAMDATA = False
 
     # Class variables
     _root_cache: Optional[Cache] = None
     _fps_hint: Optional[FPS] = None
+
+    _autonaming: Dict[str, int] = {}  # Keep track of instance initializations counts per subclass
 
     @classmethod
     def set_root_cache(cls, cache: Cache):
@@ -48,20 +54,33 @@ class Clip(metaclass=ABCMeta):
         else:
             cls._fps_hint = FPS(fps_hint)
 
-    def __init__(self, cachepref: ClipCachePref):
+    def __init__(self):
+        # Update instance count per subclass
+        clsname = self.__class__.__name__
+        nr = self._autonaming.get(clsname, 0) + 1
+        self._autonaming[clsname] = nr
+
+        # autoname: Define short name for logging, progress naming, etc.
+        self._autoname = f"{clsname}_{nr}"
+
+        # Check global cache
         if self._root_cache is None:
             # Create a global cache in Clip
             Clip._root_cache = Cache()
 
-        self._cachepref = self.CACHE_PREF if cachepref is ClipCachePref.CLASS_DEFAULT else cachepref
-
-        # Provide unique cache name
+        # Get unique cache folder name
         self.cachedir = self._root_cache.get_item_folder(
             self.__class__.__name__,
             f"{self.av_info_str}:{self._repr_data()}"
         )
 
+        # Put current autoname in cache
+        autoname_file = self.cachedir / "_autoname.txt"
+        autoname_file.write_text(self._autoname)
+
+        # Clip related attributes
         self._video_fps: Optional[FPS] = None
+        self._cached = False
 
     @property
     def has_video(self) -> bool:
@@ -74,8 +93,24 @@ class Clip(metaclass=ABCMeta):
         return ClipFlags.HasAudio in self.flags
 
     @property
+    def available_av_layer(self) -> Layer:
+        f = self.flags
+
+        if {ClipFlags.HasVideo, ClipFlags.HasAudio}.issubset(f):
+            return Layer.AV
+        elif ClipFlags.HasVideo in f:
+            return Layer.V
+        elif ClipFlags.HasAudio in f:
+            return Layer.A
+        else:
+            return Layer.NONE
+
+    @property
     def flags(self) -> Set[ClipFlags]:
-        """The clip can report his an his subclips' flags"""
+        """
+        A clip instance can report a set of flags.
+        Each Clip should compose a representative set of ClipFlags merged from potentional subclips.
+        """
         return {ClipFlags.HasMissingResources}
 
     @property
@@ -155,8 +190,7 @@ class Clip(metaclass=ABCMeta):
 
     def scale(self,
               width: int = None, height: int = None,
-              keep_aspect=True, center=True, custom: str = None,
-              cachepref=ClipCachePref.DEPENDS_ASK_INSTANCE):
+              keep_aspect=True, center=True, custom: str = None):
         """
         Scales a Clip.
         Helper/wrapper function using transform()
@@ -165,12 +199,31 @@ class Clip(metaclass=ABCMeta):
         :param keep_aspect: Keep aspect ratio of clips. Add black bars.
         :param center:
         :param custom:
-        :param cachepref: Caching policy
         :return:
         """
 
         from scriptycut.transform import Scale
-        return Scale(self, width, height, keep_aspect, center, custom, cachepref)
+        return Scale(self, width, height, keep_aspect, center, custom)
+
+
+    def ffmpeg_args(self, prefer_cache=True) -> FFargs:
+        pass
+
+    def render_cache(self, force_update_existing=False):
+        if not self.CACHE_USE:
+            return
+
+        if self._cached:
+            # The Clip is already cached
+            return
+
+        if self.has_video:
+            cached_video_file = self.cachedir / "video.ffv1"
+        if self.has_audio:
+            cached_audio_file = self.cachedir / "audio.flac"
+
+        self.render()
+
 
     def render(self, file: Pathlike, **encoding_kwargs):
         # TODO: Render interface, format incompatibility handling
@@ -207,7 +260,10 @@ class Clip(metaclass=ABCMeta):
         """
         return "[useless empty clip]"
 
-    def log(self, msg):
+    def debug(self, msg):
+        pass
+
+    def info(self, msg):
         pass
 
     def warn(self, msg):
@@ -231,28 +287,16 @@ class Clip(metaclass=ABCMeta):
         return "[Missing]"
 
     def __repr__(self):
-        return f"<{self.__class__.__name__}{self.av_info_str}:{self._repr_data()}>"
+        return f"<{self._autoname}{self.av_info_str}:{self._repr_data()}>"
 
 
 class ClipSequence(Clip):
     """
-    Full reencode
-    ffmpeg -i opening.mkv -i episode.mkv -i ending.mkv
-        -filter_complex "[0:v] [0:a] [1:v] [1:a] [2:v] [2:a] concat=n=3:v=1:a=1 [v] [a]"
-        -map "[v]" -map "[a]" output.mkv
-
-    Concat Demux
-    cat mylist.txt
-    file '/path/to/file1'
-    file '/path/to/file2'
-    file '/path/to/file3'
-
-    ffmpeg -f concat -safe 0 -i mylist.txt -c copy output.mp4
     """
 
     auto_flatten = True  # Should be True by default. Else clip1 + clip2 + clip3 creates a tree structure.
 
-    def __init__(self, clips: Iterable[Clip], auto_flatten: bool = None, cachepref=ClipCachePref.DEPENDS_ASK_INSTANCE):
+    def __init__(self, clips: Iterable[Clip], auto_flatten: bool = None):
         if auto_flatten or (auto_flatten is None and self.auto_flatten):
             self._clips = tuple(self._flatten_subclips(clips))
         else:
@@ -261,7 +305,7 @@ class ClipSequence(Clip):
         if len(self._clips) == 0:
             raise ValueError("Empty ClipSequences are not allowed.")
 
-        Clip.__init__(self, cachepref)
+        Clip.__init__(self)
 
     @staticmethod
     def _flatten_subclips(clips: Iterable[Clip]):
@@ -283,8 +327,7 @@ class ClipSequence(Clip):
 
     def match_resolutions(self,
                           width: int = None, height: int = None,
-                          from_master=False, keep_aspect=True, center=True, custom: str = None,
-                          cachepref=ClipCachePref.DEPENDS_ASK_INSTANCE):
+                          from_master=False, keep_aspect=True, center=True, custom: str = None):
         """
         Scales and fits a ClipSequence equally to a common resolution.
         Helper/wrapper function using transform()
@@ -294,7 +337,6 @@ class ClipSequence(Clip):
         :param keep_aspect: Keep aspect ratio of clips. Add black bars.
         :param center:
         :param custom:
-        :param cachepref: Caching policy
         :return:
         """
 
@@ -304,6 +346,7 @@ class ClipSequence(Clip):
 
             master_clips = tuple(c for c in self.iter_sequenced_clips() if ClipFlags.IsMasterClip)
             if not master_clips:
+                raise RuntimeError("No master clip found.")
 
 
         from scriptycut.transform import Scale
@@ -314,8 +357,7 @@ class ClipSequence(Clip):
                 # No video to scale
                 scaled_clips.append(c)
 
-
-        return ClipSequence(scaled_clips, auto_flatten=False, cachepref=cachepref)
+        return ClipSequence(scaled_clips, auto_flatten=False)
 
     def iter_sequenced_clips(self) -> Generator[Clip, None, None]:
         """Just resolve sequences in play order. May return the same clip multiple times."""
@@ -332,13 +374,13 @@ class ClipSequence(Clip):
 
 
 class RepeatClip(ClipSequence):
-    def __init__(self, clip: Clip, count: int, cachepref=ClipCachePref.DEPENDS_ASK_INSTANCE):
+    def __init__(self, clip: Clip, count: int):
         if not isinstance(count, int) or count<1:
             raise ValueError("Count must be int >= 1")
 
         self._clip = clip
         self._count = count
-        ClipSequence.__init__(self, [clip] * count, cachepref)
+        ClipSequence.__init__(self, [clip] * count, True)
 
     @property
     def clip(self) -> Clip:

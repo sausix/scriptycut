@@ -3,8 +3,9 @@
 from os import environ
 from re import compile
 from subprocess import run, Popen, PIPE
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Iterable, Dict, Union, Generator
 from functools import cached_property
+from dataclasses import dataclass
 
 from scriptycut.common import Pathlike, FPS
 from scriptycut.jobthreads import JobThread
@@ -14,11 +15,55 @@ FFMPEG_CMD_DEFAULT = environ.get("FFMPEG", "ffmpeg")
 FFPROBE_CMD_DEFAULT = environ.get("FFPROBE", "ffprobe")
 FFPLAY_CMD_DEFAULT = environ.get("FFPLAY", "ffplay")
 
+# Generic options: https://ffmpeg.org/ffmpeg.html#toc-Main-options
 
 # https://opensource.com/article/17/6/ffmpeg-convert-media-file-formats
 
 
-VIDEO_CODEC = "-c:v"
+def escape(s: str) -> str:
+    e = s.replace("\\", r"\\")
+    e = e.replace("'", r"\'")
+    return f"'{e}'"
+
+
+def _unfold_dicts_args(arg: Dict[str, str]) -> Generator[str, None, None]:
+    for k, v in arg.items():
+        yield "-" + k
+        yield v
+
+
+class FFio:
+    URL_PREFIX_ARGS = ()
+
+    def __init__(self, url: str, options: Union[Iterable[str], Dict[str, str], None]):
+        if options is None:
+            args = ()
+        elif isinstance(options, dict):
+            args = tuple(_unfold_dicts_args(options))
+        else:
+            args = tuple(options)
+
+        self._args = tuple(self.URL_PREFIX_ARGS) + args + (url, )
+
+    @property
+    def args(self) -> Tuple[str]:
+        return self._args
+
+
+class FFinput(FFio):
+    URL_PREFIX_ARGS = ("-i", )
+
+
+class FFoutput(FFio):
+    pass
+
+
+class FFargs:
+    def __init__(self, general: Iterable[str] = None, inputs=None, mapping=None, filters=None, output=None):
+        self._general: Tuple[str] = tuple(general) if general else ()
+
+    def chain(self):
+        pass
 
 
 class FFtool:
@@ -202,17 +247,9 @@ class FFtool:
 
 class FFMPEG(FFtool):
     """
-    cat file.mp3 | ffmpeg -f mp3 -i pipe: -c:a pcm_s16le -f s16le pipe:
-    cat file.mp3 | ffmpeg -f mp3 -i pipe:3 -c:a pcm_s16le -f s16le pipe:
 
-    ffmpeg -i test.wav -f avi pipe:1 | cat > test.avi
-
-    Windows receive:
-    ffmpeg.exe -y -f rawvideo -codec rawvideo -s 640x480 -r 30 -pix_fmt rgb32 -i \\.\pipe\test_pipe -an -c:v libx264 -pix_fmt yuv420p output.mp4
-    ffmpeg -r 30 -vcodec rawvideo -f rawvideo -pix_fmt yuv420p -s 1280x720 -i \\.\pipe\test_pipe -an -f rtp rtp://127.0.0.1:9090
     """
-
-    FFMPEG_ARGS = "-nostdin",
+    FFMPEG_ARGS = "-nostdin", "-y"
     # Progress https://stackoverflow.com/a/43980180/3149622
 
     def __init__(self, cmd=FFMPEG_CMD_DEFAULT):

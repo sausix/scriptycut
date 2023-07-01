@@ -4,19 +4,19 @@ import shutil
 from typing import Set
 from pathlib import Path
 from hashlib import sha256
-from enum import Enum, auto
 from logging import getLogger
+from datetime import datetime
 
 from scriptycut.common import Pathlike
 
 logger = getLogger(__name__)
 
 
-class ClipCachePref(Enum):
-    CLASS_DEFAULT = auto()
-    NEVER = auto()
-    ALWAYS = auto()
-    DEPENDS_ASK_INSTANCE = auto()
+# class ClipCachePref(Enum):
+#     CLASS_DEFAULT = auto()
+#     NEVER = auto()
+#     ALWAYS = auto()
+#     DEPENDS_ASK_INSTANCE = auto()
 
 
 class Cache:
@@ -30,10 +30,12 @@ class Cache:
         :param discard_missing: Automatically removes old cache entries from disk which have not
                                 been accessed. Do not use on multi project cache.
         """
+        logger.info(f"Creating cache instance for: '{cache_root_path}'")
         self._root_path = Path(cache_root_path).absolute()
         self._root_path.mkdir(0o750, parents=True, exist_ok=True)
         self._discard_missing = discard_missing
         self._touched_caches: Set[Path] = set()
+        logger.info(f"Created cache instance in: '{self._root_path}'")
 
     def get_item_folder(self, classname: str, item_repr_id: str) -> Path:
         """
@@ -47,13 +49,20 @@ class Cache:
         """
         hash_base_bytes = f"{classname}_{item_repr_id}".encode()  # Hash including classname
         folder_name = f"{classname}_{sha256(hash_base_bytes).digest().hex()}"
-
         item_folder = self._root_path / folder_name
-        if not item_folder.exists():
+
+        # Basic info files in cache
+        getfile = item_folder / "_cache_last_acquired_isodate.txt"
+        infofile = item_folder / "_cache_repr_id.txt"
+        createfile = item_folder / "_cache_created_isodate.txt"
+
+        if item_folder.exists():
+            getfile.write_text(datetime.now().isoformat())
+        else:
             # Create cache subdirectory
             item_folder.mkdir(0o750)
-            info = item_folder / "repr_id.txt"
-            info.write_text(item_repr_id)
+            infofile.write_text(item_repr_id)
+            createfile.write_text(datetime.now().isoformat())
 
         self.touch_cache(item_folder)
         return item_folder
@@ -78,12 +87,13 @@ class Cache:
         if not missing:
             return
 
-        print("Removing orphaned items from cache:")
+        logger.info("Removing orphaned items from cache")
         for p in missing:
-            print(p)
             if p.is_file():
+                logger.debug("Removing file: " + str(p))
                 p.unlink()
             elif p.is_dir():
+                logger.debug("Removing folder: " + str(p))
                 shutil.rmtree(p, ignore_errors=True)
 
     def __del__(self):
@@ -91,4 +101,4 @@ class Cache:
             try:
                 self.discard_missing()
             except Exception as e:
-                logger.error()
+                logger.exception("Error on discarding missing cache folders.", exc_info=e)

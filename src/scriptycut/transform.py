@@ -8,7 +8,6 @@ Probably needed to match resolutions between clips.
 from collections.abc import Generator
 
 from scriptycut.clip import Clip
-from scriptycut.cache import ClipCachePref
 from scriptycut.clipflags import ClipFlags
 
 
@@ -68,8 +67,7 @@ class Scale(Clip):
 
     def __init__(self, clip: Clip,
                  width: int = None, height: int = None,
-                 keep_aspect=True, center=True, custom: str = None,
-                 cachepref=ClipCachePref.ALWAYS):
+                 keep_aspect=True, center=True, custom: str = None):
 
         if custom:
             if any((width, height, keep_aspect)):
@@ -79,7 +77,7 @@ class Scale(Clip):
 
         self._clip = clip
         self._options = custom if custom is not None else ""
-        Clip.__init__(self, cachepref)
+        Clip.__init__(self)
 
     @property
     def clip(self) -> Clip:

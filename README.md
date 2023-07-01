@@ -27,6 +27,10 @@ ScriptyCut definitely wants to help!
 
 # Example lines
 ```python
+from scriptycut.fileclip import FileClip
+from scriptycut.image import ImageFromFile, ImageClip, Image
+from scriptycut.clip import Clip
+
 # Syntax preview. May change in near future a little.
 
 # Static video files

@@ -11,7 +11,6 @@ import imageio.v3 as iio
 
 from scriptycut.common import Pathlike
 from scriptycut.clip import Clip
-from scriptycut.cache import ClipCachePref
 from scriptycut.clipflags import ClipFlags
 
 
@@ -76,10 +75,10 @@ class ImageClip(Clip):
     """
     A single Image displayed for a time span
     """
-    def __init__(self, image: Image, duration: float, cachepref=ClipCachePref.NEVER):
+    def __init__(self, image: Image, duration: float):
         self._image = image
         self._duration = duration
-        Clip.__init__(self, cachepref)
+        Clip.__init__(self)
 
     @property
     def image(self) -> Image:
@@ -107,10 +106,10 @@ class ImageSequenceClip(Clip):
     cat *.jpg | ffmpeg -f image2pipe -c:v mjpeg -i - output.mpg
     """
 
-    def __init__(self, images: Iterable[Image], duration_each: float, cachepref=ClipCachePref.NEVER):
+    def __init__(self, images: Iterable[Image], duration_each: float):
         self._images = tuple(images)
         self._duration_each = duration_each
-        Clip.__init__(self, cachepref)
+        Clip.__init__(self)
 
     @property
     def flags(self) -> Set[ClipFlags]:

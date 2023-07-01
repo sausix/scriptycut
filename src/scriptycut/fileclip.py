@@ -6,7 +6,6 @@ from typing import Optional, Tuple, Set
 from functools import cached_property
 
 from scriptycut.clip import Clip
-from scriptycut.cache import ClipCachePref
 from scriptycut.common import Pathlike
 from scriptycut.formats import VideoFormat, AudioFormat
 from scriptycut.fftools import FFPROBE
@@ -20,6 +19,8 @@ class FileClip(Clip):
     """
     Clip based on a file on disk.
     """
+    CACHE_ENABLE = False
+
     def __init__(self, sourcefile: Pathlike,
                  video_streamindex: Optional[int] = 0,
                  audio_streamindex: Optional[int] = 0,
@@ -62,7 +63,7 @@ class FileClip(Clip):
         if found_audio:
             self._audio_format = AudioFormat.from_stream_info(self._audio_streams[audio_streamindex])
 
-        Clip.__init__(self, ClipCachePref.NEVER)
+        Clip.__init__(self)
 
         probe_info = self.cachedir / "probe.txt"
         probe_info.write_text(probe_res or "")

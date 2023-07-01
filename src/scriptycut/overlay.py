@@ -36,8 +36,7 @@ ffmpeg -f x11grab -video_size 1680x1050 -framerate 30 -i :0.0 \
         self.__clip_top = clip_top
         self.__options = options
 
-        Clip.__init__(self, True, clip_bottom.has_audio or clip_top.has_audio,
-                      max(clip_bottom.duration, clip_top.duration))
+        Clip.__init__(self)
 
     @property
     def clip_bottom(self) -> Clip:

@@ -8,6 +8,7 @@ Streams via pipes should be preferred instead of writing files to disk first.
 It's easier to run multiple ffmpeg processes instead of one with endless processing commands.
 """
 
+# https://stackoverflow.com/questions/48542644/python-and-windows-named-pipes
 
 import os
 import subprocess
