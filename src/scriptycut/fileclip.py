@@ -2,24 +2,24 @@
 
 from json import loads
 from pathlib import Path
-from typing import Optional, Tuple, Set
+from typing import Optional
 from functools import cached_property
 
-from scriptycut.clip import Clip
+from scriptycut.clip import InputClip
 from scriptycut.common import Pathlike
 from scriptycut.formats import VideoFormat, AudioFormat
 from scriptycut.fftools import FFPROBE
+from scriptycut.ffinterface import FFargInput
 from scriptycut.clipflags import ClipFlags
 
 
 ffprobe = FFPROBE()
 
 
-class FileClip(Clip):
+class FileClip(InputClip):
     """
     Clip based on a file on disk.
     """
-    CACHE_ENABLE = False
 
     def __init__(self, sourcefile: Pathlike,
                  video_streamindex: Optional[int] = 0,
@@ -39,9 +39,16 @@ class FileClip(Clip):
 
         self._sourcefile = Path(sourcefile)
 
-        probe_res = ffprobe.probe(sourcefile, error=False)  # File may be missing or not
-
+        probe_res = ffprobe.probe(sourcefile, raise_error=False)  # File may be missing or not
         data = {} if probe_res is None else loads(probe_res)
+
+        if self._sourcefile.is_file():
+            stat_info = self._sourcefile.stat()
+            self._filemoddate = stat_info.st_mtime_ns
+            self._filesize = stat_info.st_size
+        else:
+            self._filemoddate = 0
+            self._filesize = 0
 
         self._format: dict = data.get("format", {})
         self._all_streams = tuple(data.get("streams", ()))
@@ -63,7 +70,7 @@ class FileClip(Clip):
         if found_audio:
             self._audio_format = AudioFormat.from_stream_info(self._audio_streams[audio_streamindex])
 
-        Clip.__init__(self)
+        InputClip.__init__(self)
 
         probe_info = self.cachedir / "probe.txt"
         probe_info.write_text(probe_res or "")
@@ -88,7 +95,7 @@ class FileClip(Clip):
         return self._audio_format
 
     @property
-    def all_streams_info(self) -> Tuple[dict]:
+    def all_streams_info(self) -> tuple[dict, ...]:
         return self._all_streams
 
     @cached_property
@@ -97,7 +104,7 @@ class FileClip(Clip):
         return float(self._format.get("duration", 0.))
 
     @cached_property
-    def flags(self) -> Set[ClipFlags]:
+    def flags(self) -> set[ClipFlags]:
         f = {ClipFlags.FromFileResource, ClipFlags.HasDefinedFormat}
 
         if self._video_streamindex is not None:
@@ -117,6 +124,7 @@ class FileClip(Clip):
 
     def _repr_data(self) -> str:
         extra = ""
+
         if self.has_video and self._video_streamindex != 0:
             # If there's at least one video stream and the first is not selected
             extra += f":v={self._video_streamindex}"

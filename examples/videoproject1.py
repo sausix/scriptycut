@@ -12,7 +12,7 @@ from scriptycut.crossfade import Crossfade
 
 # Define cache before first Clip instance or else it will
 #   be created implicitly as "cwd/cache"
-cache = Cache("/tmp/project.cache", discard_missing=True)  # Or define a non volatile place
+cache = Cache("/tmp/project.cache", auto_discard_orphans=True)  # Or define a non volatile place
 # discard_missing should be True on project caches (default)
 #   and False on global caches for multiple projects.
 
@@ -49,6 +49,7 @@ print(video2.audio_format)  # None
 
 # Do some simple magic with clips
 mainvideo = video1 * 2 + video2
+
 
 def make_video_as_always(pre_image: Image, main: Clip) -> Clip:
     """

@@ -1,19 +1,27 @@
 # -*- coding: utf-8 -*-
 
 import logging
+import functools
 from abc import ABCMeta, abstractmethod
-from typing import Optional, Set, Tuple, Union, Dict
-from collections.abc import Iterable, Sequence, Generator
-from functools import cached_property
+from typing import Optional, Union
+from collections.abc import Iterable, Generator
 from itertools import chain
-from pathlib import Path
 
 from scriptycut.cache import Cache
-from scriptycut.common import Pathlike, FPS, Layer
-from scriptycut.fftools import FFMPEG, FFargs
+from scriptycut.common import Pathlike, FPS, Layer, ClipClassMeta
+from scriptycut.fftools import FFMPEG
 from scriptycut.clipflags import ClipFlags
+from scriptycut.ffinterface import FFArgsInterface
 
 logger = logging.getLogger('scriptycut')
+
+
+class ClipException(Exception):
+    pass
+
+
+class ClipError(Exception):
+    pass
 
 
 class Clip(metaclass=ABCMeta):
@@ -22,20 +30,27 @@ class Clip(metaclass=ABCMeta):
     Clip and their derived subclasses are always immutable!
     """
 
+    # Descriptive meta information about a subclass.
+    # Version is important for caching. Each version will retain its own cache.
+    META = ClipClassMeta()
+
     # Heavy processing should be cached especially on multiple renders
-    CACHE_ENABLE = True  # Disable when caching is really unnecessary (direct reading from file at least)
-    CACHE_BY_BACKEND = True  # If CACHE_ENABLE = True), the backend will automatically
-                             # take care of creating and offering a cache file
+    # Disable when caching is really unnecessary (direct reading from file at least)
+    CACHE_ENABLE = True
+
+    # If CACHE_ENABLE = True, the backend can automatically
+    # take care of creating and offering a cache file:
+    CACHE_BY_BACKEND = True
 
     # By default, streams are consistent with the input options.
     # Set to True on random based streams, live streams, cam/mic inputs, variable lengths etc.
-    INCONSISTENT_STREAMDATA = False
+    # INCONSISTENT_STREAMDATA = False
 
     # Class variables
     _root_cache: Optional[Cache] = None
-    _fps_hint: Optional[FPS] = None
+    _fps_hint = FPS(24)
 
-    _autonaming: Dict[str, int] = {}  # Keep track of instance initializations counts per subclass
+    _autonaming: dict[str, int] = {}  # Keep track of instance initializations counts per subclass
 
     @classmethod
     def set_root_cache(cls, cache: Cache):
@@ -70,8 +85,9 @@ class Clip(metaclass=ABCMeta):
 
         # Get unique cache folder name
         self.cachedir = self._root_cache.get_item_folder(
-            self.__class__.__name__,
-            f"{self.av_info_str}:{self._repr_data()}"
+            classname=self.__class__.__name__,
+            version=self.__class__.META.version,
+            item_repr_id=f"{self.av_info_str}:{self._repr_data()}"
         )
 
         # Put current autoname in cache
@@ -106,7 +122,7 @@ class Clip(metaclass=ABCMeta):
             return Layer.NONE
 
     @property
-    def flags(self) -> Set[ClipFlags]:
+    def flags(self) -> set[ClipFlags]:
         """
         A clip instance can report a set of flags.
         Each Clip should compose a representative set of ClipFlags merged from potentional subclips.
@@ -127,7 +143,7 @@ class Clip(metaclass=ABCMeta):
         return 0.
 
     @property
-    def video_resolution(self) -> Optional[Tuple[int, int]]:
+    def video_resolution(self) -> Optional[tuple[int, int]]:
         """
         Returns a resolution if known by Clip
         :return: tuple(width, height)
@@ -183,10 +199,10 @@ class Clip(metaclass=ABCMeta):
     #     from scriptycut.transform import Transform
     #     return Transform(self, options)
 
-    def overlay(self, other_clip: "Clip", options) -> "Clip":
+    def overlay(self, other_overlay_clip: "Clip", options) -> "Clip":
         # TODO Overlays with clips
         from scriptycut.overlay import Overlay
-        return Overlay(self, other_clip, options)
+        return Overlay(self, other_overlay_clip, options)
 
     def scale(self,
               width: int = None, height: int = None,
@@ -205,25 +221,27 @@ class Clip(metaclass=ABCMeta):
         from scriptycut.transform import Scale
         return Scale(self, width, height, keep_aspect, center, custom)
 
-
-    def ffmpeg_args(self, prefer_cache=True) -> FFargs:
-        pass
+    def ffmpeg_args(self) -> FFArgsInterface:
+        """
+        Create command line arguments for the ffmpeg call representing the clip function.
+        :return: FFArgs instance or iterable of it
+        """
 
     def render_cache(self, force_update_existing=False):
-        if not self.CACHE_USE:
+        if not self.CACHE_ENABLE:
             return
 
-        if self._cached:
+        if self._cached and not force_update_existing:
             # The Clip is already cached
             return
 
         if self.has_video:
             cached_video_file = self.cachedir / "video.ffv1"
         if self.has_audio:
-            cached_audio_file = self.cachedir / "audio.flac"
+            cached_audio_file = self.cachedir / "audio.wav"  # or flac
 
         self.render()
-
+        self._cached = True
 
     def render(self, file: Pathlike, **encoding_kwargs):
         # TODO: Render interface, format incompatibility handling
@@ -252,14 +270,6 @@ class Clip(metaclass=ABCMeta):
         """
         yield self
 
-    @abstractmethod
-    def _repr_data(self) -> str:
-        """
-        Clips are immutable for caching.
-        Always reflect all settings for a subclass instance into this function.
-        """
-        return "[useless empty clip]"
-
     def debug(self, msg):
         pass
 
@@ -284,10 +294,30 @@ class Clip(metaclass=ABCMeta):
         if ClipFlags.HasAudio in self.flags:
             return "[A]"
 
-        return "[Missing]"
+        if ClipFlags.HasMissingResources in self.flags:
+            return "[Missing]"
+
+        return "[NonAV]"
+
+    @abstractmethod
+    def _repr_data(self) -> str:
+        """
+        Clips are immutable for caching.
+        Always reflect all settings for a subclass instance into this function.
+        """
+        return "[useless empty clip]"
 
     def __repr__(self):
         return f"<{self._autoname}{self.av_info_str}:{self._repr_data()}>"
+
+
+class InputClip(Clip, metaclass=ABCMeta):
+    """
+    These Clip input derivates don't really need caching (hence they're a plain file probably).
+    Also the render process should integrate these sources directly as input arguments of the next
+    ffmpeg processing command.
+    """
+    CACHE_ENABLE = False  # We're probably reading from a file source etc. anyway, so caching would be unnecessary.
 
 
 class ClipSequence(Clip):
@@ -317,11 +347,11 @@ class ClipSequence(Clip):
                 # Just append
                 yield clip
 
-    @cached_property
-    def flags(self) -> Set[ClipFlags]:
+    @functools.cached_property
+    def flags(self) -> set[ClipFlags]:
         return ClipFlags.merge_from_clips(self._clips, append=ClipFlags.HasSequence)
 
-    @cached_property
+    @functools.cached_property
     def duration(self) -> float:
         return sum(c.duration for c in self._clips)
 
@@ -397,3 +427,26 @@ class RepeatClip(ClipSequence):
 
     def _repr_data(self) -> str:
         return f"{self._count}×{self._clip!r}"
+
+
+class Libavfilter(InputClip):
+    """
+    Create clips by ffmpeg's lavfi device
+    https://ffmpeg.org/ffmpeg-devices.html#Examples-5
+    """
+    def __init__(self, filtergraph: str, duration: float):
+        self._filtergraph = filtergraph
+        self._duration = duration
+
+        InputClip.__init__(self)
+
+    @property
+    def duration(self) -> float:
+        return self._duration
+
+    @property
+    def filtergraph(self):
+        return self._filtergraph
+
+    def _repr_data(self) -> str:
+        return f"{self._duration}"

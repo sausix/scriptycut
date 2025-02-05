@@ -1,13 +1,16 @@
 # -*- coding: utf-8 -*-
 
-from os import environ
-from re import compile
-from subprocess import run, Popen, PIPE
-from typing import Optional, List, Tuple, Iterable, Dict, Union, Generator
-from functools import cached_property
-from dataclasses import dataclass
+"""
+Classes and functions to interface ffmpeg executables
+"""
 
-from scriptycut.common import Pathlike, FPS
+import re
+from os import environ
+from subprocess import run, Popen, PIPE
+from typing import Optional
+from functools import cached_property
+
+from scriptycut.common import Pathlike
 from scriptycut.jobthreads import JobThread
 
 
@@ -20,57 +23,11 @@ FFPLAY_CMD_DEFAULT = environ.get("FFPLAY", "ffplay")
 # https://opensource.com/article/17/6/ffmpeg-convert-media-file-formats
 
 
-def escape(s: str) -> str:
-    e = s.replace("\\", r"\\")
-    e = e.replace("'", r"\'")
-    return f"'{e}'"
-
-
-def _unfold_dicts_args(arg: Dict[str, str]) -> Generator[str, None, None]:
-    for k, v in arg.items():
-        yield "-" + k
-        yield v
-
-
-class FFio:
-    URL_PREFIX_ARGS = ()
-
-    def __init__(self, url: str, options: Union[Iterable[str], Dict[str, str], None]):
-        if options is None:
-            args = ()
-        elif isinstance(options, dict):
-            args = tuple(_unfold_dicts_args(options))
-        else:
-            args = tuple(options)
-
-        self._args = tuple(self.URL_PREFIX_ARGS) + args + (url, )
-
-    @property
-    def args(self) -> Tuple[str]:
-        return self._args
-
-
-class FFinput(FFio):
-    URL_PREFIX_ARGS = ("-i", )
-
-
-class FFoutput(FFio):
-    pass
-
-
-class FFargs:
-    def __init__(self, general: Iterable[str] = None, inputs=None, mapping=None, filters=None, output=None):
-        self._general: Tuple[str] = tuple(general) if general else ()
-
-    def chain(self):
-        pass
-
-
 class FFtool:
     """
     Access to FFmpeg and their tools
     """
-    GENERAL_ARGS = "-hide_banner",
+    GENERAL_ARGS = ("-hide_banner", )
     CODECS_ARGS = "-v", "error", "-codecs"
     VERSION_ARGS = "-v", "error", "-version"
     FILTER_ARGS = "-v", "error", "-filters"
@@ -78,15 +35,14 @@ class FFtool:
 
     def __init__(self, cmd: str):
         self.cmd = cmd
-        res = run([self.cmd, *self.GENERAL_ARGS, *self.VERSION_ARGS], capture_output=True, timeout=5, text=True)
-        if res.returncode != 0:
-            raise IOError("Version call failed. Binary missing?")
+        res = run((self.cmd, *self.GENERAL_ARGS, *self.VERSION_ARGS),
+                  capture_output=True, timeout=5, text=True, check=True)
         self.version = res.stdout
 
     @cached_property
     def filters(self):
         # " T.C acrusher          A->A       Reduce audio bit resolution.\n"
-        regex = compile(r" (.{3}) ([^ ]+) +([AVN|]+)->([^ ]+) +(.*)\n")
+        regex = re.compile(r" (.{3}) ([^ ]+) +([AVN|]+)->([^ ]+) +(.*)\n")
         timeline_support = set()
         slice_support = set()
         command_support = set()
@@ -149,11 +105,11 @@ class FFtool:
     @cached_property
     def pix_fmts(self):
         # "IO... yuv422p                3             16      8-8-8\n"
-        regex = compile(r"IO(.{3}) ([^ ]+) +([0-9]+) +([0-9]+) +(.*)\n")
+        regex = re.compile(r"IO(.{3}) ([^ ]+) +([0-9]+) +([0-9]+) +(.*)\n")
 
         paletted = set()
         bitstream = set()
-        details: dict[str, Tuple[int, int, str]] = {}  # key, num components (channels), bit per pixel, bit depths
+        details: dict[str, tuple[int, int, str]] = {}  # key, num components (channels), bit per pixel, bit depths
         pix_fmts_info = dict(paletted=paletted,
                              bitstream=bitstream,
                              details=details)
@@ -181,7 +137,7 @@ class FFtool:
     @cached_property
     def codecs(self):
         # " DES... xsub                 XSUB\n"
-        regex = compile(r" (.{6}) ([^ ]+) +(.*)\n")
+        regex = re.compile(r" (.{6}) ([^ ]+) +(.*)\n")
 
         decode = set()
         encode = set()
@@ -259,13 +215,17 @@ class FFMPEG(FFtool):
         return JobThread([self.cmd, *self.GENERAL_ARGS, *self.FFMPEG_ARGS, *args], cwd=cache_path, autorun=True)
 
     @staticmethod
-    def testvideo_args(seconds=10, resolution=(1280, 720), fps=30) -> List[str]:
+    def testvideo_args(seconds=10, resolution=(1280, 720), fps=30) -> list[str]:
         return ["-f", "lavfi", "-i", f"testsrc=duration={seconds}:size={resolution[0]}x{resolution[1]}:rate={fps}"]
 
     @staticmethod
-    def cache_output_args(output_file: Pathlike, resolution: Tuple[int, int] = None, fps: float = None, alpha: bool = None) ->List[str]:
+    def cache_output_args(output_file: Pathlike, resolution: tuple[int, int] = None, fps: float = None, alpha: bool = None) -> list[str]:
         """
-        yuv420p yuva420p yuva422p yuv444p yuva444p yuv440p yuv422p yuv411p yuv410p bgr0 bgra yuv420p16le yuv422p16le yuv444p16le yuv444p9le yuv422p9le yuv420p9le yuv420p10le yuv422p10le yuv444p10le yuv420p12le yuv422p12le yuv444p12le yuva444p16le yuva422p16le yuva420p16le yuva444p10le yuva422p10le yuva420p10le yuva444p9le yuva422p9le yuva420p9le gray16le gray gbrp9le gbrp10le gbrp12le gbrp14le gbrap10le gbrap12le ya8 gray10le gray12le gbrp16le rgb48le gbrap16le rgba64le gray9le yuv420p14le yuv422p14le yuv444p14le yuv440p10le yuv440p12le
+        yuv420p yuva420p yuva422p yuv444p yuva444p yuv440p yuv422p yuv411p yuv410p bgr0 bgra yuv420p16le yuv422p16le
+        yuv444p16le yuv444p9le yuv422p9le yuv420p9le yuv420p10le yuv422p10le yuv444p10le yuv420p12le yuv422p12le
+        yuv444p12le yuva444p16le yuva422p16le yuva420p16le yuva444p10le yuva422p10le yuva420p10le yuva444p9le
+        yuva422p9le yuva420p9le gray16le gray gbrp9le gbrp10le gbrp12le gbrp14le gbrap10le gbrap12le ya8 gray10le
+        gray12le gbrp16le rgb48le gbrap16le rgba64le gray9le yuv420p14le yuv422p14le yuv444p14le yuv440p10le yuv440p12le
         """
         return ["-vcodec", "ffv1"]
 
@@ -276,13 +236,9 @@ class FFPROBE(FFtool):
     def __init__(self, cmd=FFPROBE_CMD_DEFAULT):
         FFtool.__init__(self, cmd)
 
-    def probe(self, file: Pathlike, error=True) -> Optional[str]:
-        res = run([self.cmd, *self.GENERAL_ARGS, *self.PROBE_ARGS, file], capture_output=True, timeout=10, text=True)
-        if res.returncode != 0:
-            if error:
-                raise IOError("ffprobe call failed.")
-            else:
-                return None
+    def probe(self, file: Pathlike, raise_error=True) -> Optional[str]:
+        res = run((self.cmd, *self.GENERAL_ARGS, *self.PROBE_ARGS, file),
+                  capture_output=True, timeout=10, text=True, check=raise_error)
         return res.stdout
 
 
@@ -291,12 +247,12 @@ class FFPLAY(FFtool):
     Player output. Previewing clips etc.
     """
 
-    PLAY_ARGS = "-autoexit",
+    PLAY_ARGS = ("-autoexit", )
 
     def __init__(self, cmd=FFPLAY_CMD_DEFAULT):
         FFtool.__init__(self, cmd)
 
-    def play(self, args: List[str]):
+    def play(self, args: list[str]):
         JobThread([self.cmd, *self.GENERAL_ARGS, *self.PLAY_ARGS, *args], autorun=True)
 
     def play_file(self, file: Pathlike):

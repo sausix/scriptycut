@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from typing import Union
+from typing import Union, Optional
 from pathlib import Path
 from sys import platform
 from enum import IntFlag, auto
@@ -84,3 +84,20 @@ class FPS:
 
     def __eq__(self, other):
         pass
+
+
+class ClipClassMeta:
+    def __init__(self,
+                 version: Union[int, str, None] = None,
+                 name: Optional[str] = None,
+                 description="Unnamed Clip class",
+                 author: Optional[str] = None,
+                 documentation: Optional[str] = None,
+                 source_url: Optional[str] = None
+                 ):
+        self.version = version
+        self.name = name
+        self.description = description
+        self.author = author
+        self.documentation = documentation
+        self.source_url = source_url

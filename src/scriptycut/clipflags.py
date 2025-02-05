@@ -33,6 +33,7 @@ class ClipFlags(Enum):
             raise RuntimeError("Including and excluding at the same time is not logical.")
 
         from scriptycut.clip import Clip
+
         def unpack_clips(c):
             if isinstance(c, Clip):
                 yield c
