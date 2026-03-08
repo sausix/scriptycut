@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
 from dataclasses import dataclass, fields
+from typing import Any
 
 
 @dataclass
@@ -12,8 +13,12 @@ class Format:
     time_base: str
 
     @classmethod
-    def from_stream_info(cls, si: dict) -> "Format":
+    def from_stream_info(cls, si: dict[str, Any]) -> "Format":
         codec_type = si.get("codec_type")
+
+        if not isinstance(codec_type, str):
+            raise ValueError("Codec type not a string?")
+
         subcls = _mapping.get(codec_type)
         if subcls is None:
             raise ValueError("Unknown codec type. Only video and audio are supported.")
@@ -23,6 +28,7 @@ class Format:
     @classmethod
     def filter_si_dict(cls, si: dict):
         return {key: value for key, value in si.items() if key in (f.name for f in fields(cls))}
+
 
 @dataclass
 class VideoFormat(Format):
@@ -35,8 +41,9 @@ class VideoFormat(Format):
     level: int
 
     @classmethod
-    def from_stream_info(cls, si: dict) -> "VideoFormat":
+    def from_stream_info(cls, si: dict[str, Any]) -> "VideoFormat":
         return cls(**cls.filter_si_dict(si))
+
 
 @dataclass
 class AudioFormat(Format):
@@ -46,7 +53,7 @@ class AudioFormat(Format):
     sample_rate: str
 
     @classmethod
-    def from_stream_info(cls, si: dict) -> "AudioFormat":
+    def from_stream_info(cls, si: dict[str, Any]) -> "AudioFormat":
         return cls(**cls.filter_si_dict(si))
 
 

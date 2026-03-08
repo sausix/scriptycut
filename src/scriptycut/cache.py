@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
 
 import shutil
-from typing import Set, Union
+from typing import Union
 from pathlib import Path
 from hashlib import sha256
 from logging import getLogger
 from datetime import datetime
 from json import dumps
+from os import environ
 
 from scriptycut.common import Pathlike
 
@@ -20,54 +21,55 @@ class Cache:
     For a single project or common cache for multiple video projects.
     """
 
-    CACHE_ROOT_PATH = Path("cache")
-    AUTO_DISCARD_ORPHANS = True
+    ROOT_PATH = Path(environ.get("CACHE_ROOT_DIR", "cache")).absolute()
+    AUTODISCARD_ORPHANS = \
+        environ.get("CACHE_AUTODISCARD_ORPHANS", "0").lower() not in {"0", "no", "n", "off", "false"}
 
-    def __init__(self, cache_root_path: Pathlike = CACHE_ROOT_PATH, auto_discard_orphans=_CLASS_DEFAULT):
+    def __init__(self, cache_root_path: Pathlike = ROOT_PATH, autodiscard_orphans=_CLASS_DEFAULT):
         """
         :param cache_root_path: Folder on file system. May consume a lot of space.
-        :param auto_discard_orphans: Automatically removes old cache entries from disk which have not
+        :param autodiscard_orphans: Automatically removes old cache entries from disk which have not
                                      been accessed. Do not use on multi project cache.
         """
         logger.info(f"Creating cache instance for: {cache_root_path}")
-        self._root_path = Path(cache_root_path).absolute()
+        self._root_path = Path(cache_root_path).expanduser().absolute()
         self._root_path.mkdir(0o750, parents=True, exist_ok=True)
 
-        self._auto_discard_orphans = self.AUTO_DISCARD_ORPHANS if auto_discard_orphans is _CLASS_DEFAULT else auto_discard_orphans
-        self._touched_caches: Set[Path] = set()  # Remember items here
+        self._auto_discard_orphans = self.AUTODISCARD_ORPHANS if autodiscard_orphans is _CLASS_DEFAULT else autodiscard_orphans
+        self._touched_caches: set[Path] = set()  # Remember items here
         logger.info(f"Created cache instance in: {self._root_path}")
 
-    def get_item_folder(self, classname: str, version: Union[int, str, None], item_repr_id: str) -> Path:
+    def get_item_folder(self, classname: str, version: Union[int, str, None], item_definition: str) -> Path:
         """
         Creates or retrieves a cache folder based a classname, version and the unique instance definition.
-        Classname, version and the id are being hashed.
+        Classname, version and the id are being hashed mostly to avoid illegal path chars.
 
         :param classname: Should be the classname of a Clip subclass
         :param version: Cache could be depending on specific class versions
-        :param item_repr_id: Should be the repr_id of a Clip instance base on the Clip config.
+        :param item_definition: Should be the definition of a Clip instance base on the Clip config.
         :return: Path object ready to write or read files from.
         """
-        hash_base_bytes = f"{classname}_{version}_{item_repr_id}".encode()  # Hash including classname
+        hash_base_bytes = f"{classname}_{version}_{item_definition}".encode()  # Hash including classname
         item_folder = self._root_path / f"{classname}_{sha256(hash_base_bytes).digest().hex()}"
 
         # Basic info files in cache
         last_access_file = item_folder / "_cache_last_access.txt"
 
+        now = datetime.now()
         if not item_folder.exists():
             # Create cache subdirectory
-            item_folder.mkdir(0o750)
-
+            item_folder.mkdir(0o750, parents=True)
             info_file = item_folder / "_cache_info.json"
             info = {
                 "class": classname,
                 "version": version,
-                "repr_id": item_repr_id,
-                "created_iso": datetime.now().isoformat(),
-                "created_ts": datetime.now().timestamp()
+                "repr_id": item_definition,
+                "created_iso": now.isoformat(),
+                "created_ts": now.timestamp()
             }
             info_file.write_text(dumps(info))
 
-        last_access_file.write_text(datetime.now().isoformat())
+        last_access_file.write_text(now.isoformat())
 
         self.touch_item_cache(item_folder)
         return item_folder
@@ -83,6 +85,9 @@ class Cache:
         """
         self._touched_caches.add(Path(item_folder))
 
+    def untouch_item_cache(self):
+        self._touched_caches.clear()
+
     def discard_orphans(self):
         """
         Remove all cached files which have not been touched in this instance.
@@ -92,6 +97,7 @@ class Cache:
         missing = all_items - self._touched_caches
 
         if not missing:
+            logger.info("Found no orphaned items in cache.")
             return
 
         logger.info("Discarding orphaned items from cache")

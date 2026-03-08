@@ -73,8 +73,6 @@ class Scale(Clip):
             if any((width, height, keep_aspect)):
                 raise TypeError("When specifying 'custom', other arguments are not allowed.")
 
-
-
         self._clip = clip
         self._options = custom if custom is not None else ""
         Clip.__init__(self)
@@ -90,5 +88,5 @@ class Scale(Clip):
         yield from self._clip.iter_all_clips()
         yield self
 
-    def _repr_data(self) -> str:
+    def unique_repr_str(self) -> str:
         return f"{self._clip}:{self._options}"

@@ -12,6 +12,7 @@ from typing import Union
 
 from scriptycut.clip import Clip
 
+
 def _prepare_slice(slice_info: Union[slice, tuple[slice, ...]], clip_duration: float):
     # Check bounds etc. Calculate duration.
     # Prevent steps and reverse video?
@@ -35,5 +36,5 @@ class Slice(Clip):
     def duration(self) -> float:
         return self._duration
 
-    def _repr_data(self) -> str:
+    def unique_repr_str(self) -> str:
         return f"{self._clip}↹{self._slice_info!r}"

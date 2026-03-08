@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import subprocess
 from typing import Union, Optional
 from pathlib import Path
 from sys import platform
@@ -13,25 +14,27 @@ Pathlike = Union[Path, str]
 threads_num = int(environ.get("THREADS", "1"))
 
 
-def popen_config(show_window: bool) -> dict:
-    # TODO: Really needed?
-    kwargs = {}
-
-    if platform.startswith("win"):
-        from subprocess import STARTUPINFO, STARTF_USESHOWWINDOW
-        si = STARTUPINFO()
-        si.dwFlags |= STARTF_USESHOWWINDOW
-        si.wShowWindow = int(show_window)
-        kwargs["startupinfo"] = si
-
-    return kwargs
+def startupinfo_show_window(show=False) -> Optional[subprocess.STARTUPINFO]:
+    if platform == "win32":
+        return subprocess.STARTUPINFO(
+            dwFlags=subprocess.STARTF_USESHOWWINDOW,
+            wShowWindow=int(show)
+        )
+    return None
 
 
 class Layer(IntFlag):
     NONE = 0
-    A = auto()
-    V = auto()
+    A = 1
+    V = 2
     AV = A + V
+
+
+class ClipState(IntFlag):
+    Initialized = 0
+    Caching = auto()
+    Ready = auto()
+    Error = auto()
 
 
 class FPS:
@@ -42,8 +45,9 @@ class FPS:
     int: 60
     str: "30000/1001"
     """
-    def __init__(self, fps: Union[int, str]):
+    def __init__(self, fps: Union[int, str], allow_vfr: bool):
         self._fps = fps
+        self._vfr = allow_vfr
 
         if isinstance(fps, int):
             self._numerator = int(fps)
@@ -86,18 +90,30 @@ class FPS:
         pass
 
 
-class ClipClassMeta:
-    def __init__(self,
-                 version: Union[int, str, None] = None,
-                 name: Optional[str] = None,
-                 description="Unnamed Clip class",
-                 author: Optional[str] = None,
-                 documentation: Optional[str] = None,
-                 source_url: Optional[str] = None
-                 ):
-        self.version = version
-        self.name = name
-        self.description = description
-        self.author = author
-        self.documentation = documentation
-        self.source_url = source_url
+class VideoResolution:
+    def __init__(self, width: int, height: int):
+        self._width: int = width
+        self._height: int = height
+
+    @property
+    def width(self):
+        return self._width
+
+    @property
+    def height(self):
+        return self._height
+
+    @property
+    def as_tuple(self) -> tuple[int, int]:
+        return self._width, self._height
+
+
+# Used as defaults for generative Clips
+default_metrics = dict(
+    video=dict(
+        fps=FPS(24, allow_vfr=False),
+    ),
+    audio=dict(
+        channels=2,
+    )
+)

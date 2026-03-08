@@ -63,5 +63,5 @@ class Crossfade(Clip):
     def layer(self) -> Layer:
         return self._layer
 
-    def _repr_data(self) -> str:
+    def unique_repr_str(self) -> str:
         return f"{self._duration}s:{self._options}:{self._clip1!r}->{self._clip2!r}@{self._layer.name}"

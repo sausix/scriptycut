@@ -16,11 +16,11 @@ class ClipFlags(Enum):
     HasAudio = auto()  # Clip or at least one subclip has an audio stream
     HasAlpha = auto()
     FromFileResource = auto()  # Clip or a subclip reads directly from a file
-    IsMasterClip = auto()  # Clip is marked as master. Prefer its format for rendering.
-    HasDefinedFormat = auto()  # Clip has a preferred format (from file etc)
+    # IsMasterClip = auto()  # Clip is marked as master. Prefer its format for rendering.
+    # HasDefinedFormat = auto()  # Clip has a preferred format (from file etc)
 
     # Inherit from subclips
-    ContainsMasterClip = auto()  # Clip or a subclip is marked as master. Prefer its format for rendering.
+    # ContainsMasterClip = auto()  # Clip or a subclip is marked as master. Prefer its format for rendering.
     HasMissingResources = auto()  # Clip or a subclip has at least one missing resource
     HasSequence = auto()  # Clip or a subclip is a container of other subclips.
 

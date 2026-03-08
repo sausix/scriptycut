@@ -3,123 +3,294 @@
 import logging
 import functools
 from abc import ABCMeta, abstractmethod
-from typing import Optional, Union
+from typing import Optional, Type, TypeVar, Any, overload
 from collections.abc import Iterable, Generator
 from itertools import chain
+from pathlib import Path
 
 from scriptycut.cache import Cache
-from scriptycut.common import Pathlike, FPS, Layer, ClipClassMeta
+from scriptycut.common import FPS, Layer, ClipState, default_metrics, VideoResolution
 from scriptycut.fftools import FFMPEG
 from scriptycut.clipflags import ClipFlags
-from scriptycut.ffinterface import FFArgsInterface
-
-logger = logging.getLogger('scriptycut')
+from scriptycut.frame import Frame
 
 
-class ClipException(Exception):
-    pass
+T = TypeVar("T", bound="Clip")
+
+logger = logging.getLogger("scriptycut")
 
 
 class ClipError(Exception):
     pass
 
 
-class Clip(metaclass=ABCMeta):
+class ClipMeta(ABCMeta):
     """
-    The base class representing audio and/or video over a time span from a source.
-    Clip and their derived subclasses are always immutable!
+    This meta class provides cached singleton instances per unique configuration of Clip subclasses.
+    """
+    _cache = {}
+
+    def __call__(cls: Type[T], *args, **kwargs) -> T:
+        # Create a new clip instance, may be temporarily.
+        clip_instance: T = ABCMeta.__call__(cls, *args, **kwargs)
+
+        # definition_str is only available after Clip.__init__()
+        # Different args may still point to the same Clip config so just using args and kwargs is not enough.
+        key = f"{cls.__name__}_{clip_instance.definition_str}"
+
+        # Check cache
+        if key in cls._cache:
+            # Matching instance found.
+            #
+            return ClipMeta._cache[key]
+
+        # Cache and return new instance
+        ClipMeta._cache[key] = clip_instance
+
+        # Instance number counting
+        nr = cls._instance_counter.get(cls, 0) + 1
+        cls._instance_counter[cls] = nr  # Initialize or increase instance number.
+
+        if clip_instance.name is None:  # Unnamed
+            # Set an appropriate instance name
+            clip_instance.name = clip_instance.name_hint() or f"{cls.__name__}-{nr}"
+
+        return clip_instance
+
+
+class ClipBase(metaclass=ABCMeta):
+    """
+    All abstract methods required by Clip subclasses
     """
 
     # Descriptive meta information about a subclass.
     # Version is important for caching. Each version will retain its own cache.
-    META = ClipClassMeta()
+    meta_name: str = "Unnamed Clip class"
+    meta_description: str = "Does nothing yet"
+    meta_version: int | str = 0
+    meta_source_url: str = ""
+    meta_doc_url: str = ""
 
-    # Heavy processing should be cached especially on multiple renders
-    # Disable when caching is really unnecessary (direct reading from file at least)
-    CACHE_ENABLE = True
+    @abstractmethod
+    def audio(self) -> Optional["Clip"]:
+        """Return a audio only clip (if available), None or itself if already representing audio only"""
 
-    # If CACHE_ENABLE = True, the backend can automatically
-    # take care of creating and offering a cache file:
-    CACHE_BY_BACKEND = True
+    @abstractmethod
+    def video(self) -> Optional["Clip"]:
+        """Return a video only clip (if available), None or itself if already representing video only"""
 
-    # By default, streams are consistent with the input options.
-    # Set to True on random based streams, live streams, cam/mic inputs, variable lengths etc.
-    # INCONSISTENT_STREAMDATA = False
-
-    # Class variables
-    _root_cache: Optional[Cache] = None
-    _fps_hint = FPS(24)
-
-    _autonaming: dict[str, int] = {}  # Keep track of instance initializations counts per subclass
-
-    @classmethod
-    def set_root_cache(cls, cache: Cache):
-        """Defines the root cache of a Clip or a subclass for all derived classes and instances"""
-        cls._root_cache = cache
-
-    @classmethod
-    def set_fps_hint(cls, fps_hint: Union[str, int, FPS]):
+    @property
+    @abstractmethod
+    def definition_str(self) -> str:
         """
-        Defines a default FPS value, for generative clips.
-        FPS can vary in most container formats anyway. So just a hint if a Clip want it.
+        Clips are immutable for caching.
+        Always reflect all settings for a subclass instance into this function.
+        Keep the result constant! Remember: Clips are immutable.
         """
 
-        if isinstance(fps_hint, FPS):
-            cls._fps_hint = fps_hint
-        else:
-            cls._fps_hint = FPS(fps_hint)
 
-    def __init__(self):
-        # Update instance count per subclass
-        clsname = self.__class__.__name__
-        nr = self._autonaming.get(clsname, 0) + 1
-        self._autonaming[clsname] = nr
+class Clip(ClipBase, metaclass=ClipMeta):  # noqa, PyCharm highlights missing abstract methods here.
+    """
+    The base class representing audio and/or video over a time span from a source.
+    Instances of derived subclasses are always immutable!
+    """
 
-        # autoname: Define short name for logging, progress naming, etc.
-        self._autoname = f"{clsname}_{nr}"
+    # Set of available Clip subclasses.
+    _clip_classes: set[Type["Clip"]] = set()
 
-        # Check global cache
-        if self._root_cache is None:
-            # Create a global cache in Clip
-            Clip._root_cache = Cache()
+    # Keep track of instance initializations counts per subclass, mostly for auto naming.
+    _instance_counter: dict[Type["Clip"], int] = {}
+
+    # Internal class variables
+    _cache: Optional[Cache] = None
+
+    # Default cache file names
+    cache_video_file_name = "clip-video.ffv1"  # Lossless video format
+    cache_audio_file_name = "clip-audio.wav"
+    cache_av_file_name = "clip.mkv"
+
+    # Default values globally or per Clip class. Mostly for generative Clips like FPS.
+    # These values are being merged with specialized values from render calls.
+    _default_metrics: Optional[dict[str, Any]] = default_metrics
+
+    _instance_formatter = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(message)s"
+    )
+
+    def __init_subclass__(cls):
+        # Register known Clip subclasses.
+        cls._clip_classes.add(cls)
+
+    def name_hint(self) -> Optional[str]:  # noqa, it's an instance method.
+        # Clips can return a better name recommendation. A file name for example.
+        return None
+
+    @classmethod
+    def set_cache(cls, cache: Cache):
+        """Defines the cache of the Clip class or a specific subclass for all derived classes and instances"""
+        cls._cache = cache
+
+    def __init__(self, only_layer: Layer = Layer.AV):
+        if type(self) is Clip:
+            raise NotImplementedError("A bare Clip can't be initialized. Use a specific subclass.")
+
+        self._name: Optional[str] = None
+
+        # Just output/process these layers
+        self._layer_filter = only_layer
+
+        # Check and create global cache
+        if self._cache is None:
+            # Missing cache.
+            # Create a new global cache in Clip class
+            Clip.set_cache(Cache())
+
+        if self._cache is None:
+            raise RuntimeError("Could not create cache instance.")
 
         # Get unique cache folder name
-        self.cachedir = self._root_cache.get_item_folder(
+        self._cache_dir = self._cache.get_item_folder(
             classname=self.__class__.__name__,
-            version=self.__class__.META.version,
-            item_repr_id=f"{self.av_info_str}:{self._repr_data()}"
+            version=self.__class__.meta_version,
+            item_definition=f"{self.definition_str}"
         )
 
-        # Put current autoname in cache
-        autoname_file = self.cachedir / "_autoname.txt"
-        autoname_file.write_text(self._autoname)
+        # Logging
+        self._logger = logging.getLogger(f"{self.__class__.__module__}.{self.__class__.__name__}.{self.instance_number}")
+        self._logger.setLevel(logging.DEBUG)
+        self._logfile = self._cache_dir / "log.txt"
+        self._loghandler = logging.FileHandler(self._logfile, encoding="utf-8")
+        self._loghandler.setFormatter(self._instance_formatter)
+        self._logger.addHandler(self._loghandler)
+        self.log = self._logger.log
+        self.info = self._logger.info
+        self.debug = self._logger.debug
+        self.warn = self._logger.warning
+        self.err = self._logger.error
+
+        self.info(
+            "=== Clip class: %s",
+            f"{self.__class__.__module__}.{self.__class__.__name__}",
+            self.instance_number,
+        )
+
+        self.info("Name: %s", self.meta_name)
+        self.info("Description: %s", self.meta_description)
+        self.info("Version: %s", self.meta_version)
+        self.info("Source URL: %s", self.meta_source_url)
+        self.info("Documentation URL: %s", self.meta_doc_url)
+        self.info(
+            "--- Clip instance: %s",
+            f"{self.__class__.__module__}.{self.__class__.__name__}.{self.instance_number}",
+            self.instance_number,
+        )
+
+        # Name: Define short name for logging, progress naming, etc.
+        self._name_file = self._cache_dir / "_name.txt"
+
+        if self._name_file.exists():
+            # Read name from file
+            self._name = self._name_file.read_text()
+
+        self.info("Name: %s", self._name or "[None]")
+        self.info("Definition: %s", self.definition_str)
+        self.info("AV Info: %s", self.av_info_str)
+        self.info("Cache directory: %s", self._cache_dir)
 
         # Clip related attributes
-        self._video_fps: Optional[FPS] = None
-        self._cached = False
+        self._state = ClipState.Initialized
+
+    @property
+    def instance_number(self) -> int:
+        """
+        Returns a sequential number of the instance based on its Clip class
+        """
+        return self._instance_counter[self.__class__]
+
+    @property
+    def state(self) -> ClipState:
+        return self._state
+
+    def _set_state(self, new_state: ClipState):
+        self.info("New Clip state: %s", new_state)
+        self._state = new_state
+
+    @property
+    def cache_dir(self) -> Path:
+        """Directory dedicated to this exact immutable clip instance."""
+        return self._cache_dir
+
+    def file_path(self) -> Path:
+        """
+        Returns a file path which points to an existing source file or to a location in the cache folder.
+        If pointing to the cache then the file may not exist (yet)
+        :return: Path to a file which points to a resource.
+        """
+
+    def file_path_blocking(self) -> Path:
+        """
+        Returns a file path which points to an existing source file or to a location in the cache folder.
+        If the resource has not been rendered then this function blocks until the file is ready.
+        :return: Path to a file which points to a resource.
+        """
+
+    @property
+    def name(self) -> Optional[str]:
+        """
+        Name of the clip instance
+        :return: Returns the human readable name of the clip instance.
+        """
+        return self._name
+
+    @name.setter
+    def name(self, new_name: str):
+        """
+        Sets a new name to the clip instance
+        :new_name: The new name as string.
+        """
+        self._name = new_name
+        self._name_file.write_text(new_name)
+        self.info("New instance name: %s", new_name)
+
+    @property
+    def effective_layer(self) -> Layer:
+        """
+        Returns the effectively available layer mask of the clip.
+        :return: The layer_filter argument provided to __init__ combined with actually available layers of the source.
+        """
+        flags = self.flags  # Calculate flags of clip once
+
+        if ClipFlags.HasAudio in flags and ClipFlags.HasVideo in flags and self._layer_filter == Layer.AV:
+            return Layer.AV
+        elif (ClipFlags.HasVideo in flags) and (self._layer_filter & Layer.V):
+            return Layer.V
+        elif (ClipFlags.HasAudio in flags) and (self._layer_filter & Layer.A):
+            return Layer.A
+        else:
+            return Layer.NONE
+
+    @property
+    def layer_filter(self) -> Layer:
+        """
+        Returns the requested layer mask of the clip.
+        :return: The layer_filter argument provided to __init__.
+        """
+        return self._layer_filter
 
     @property
     def has_video(self) -> bool:
         """Shorthand property if clip or a subclip has video"""
-        return ClipFlags.HasVideo in self.flags
+        return bool(self.effective_layer & Layer.V)
 
     @property
     def has_audio(self) -> bool:
         """Shorthand property if clip or a subclip has audio"""
-        return ClipFlags.HasAudio in self.flags
+        return bool(self.effective_layer & Layer.A)
 
     @property
-    def available_av_layer(self) -> Layer:
-        f = self.flags
-
-        if {ClipFlags.HasVideo, ClipFlags.HasAudio}.issubset(f):
-            return Layer.AV
-        elif ClipFlags.HasVideo in f:
-            return Layer.V
-        elif ClipFlags.HasAudio in f:
-            return Layer.A
-        else:
-            return Layer.NONE
+    def has_audiovideo(self) -> bool:
+        """Shorthand property if clip or a subclip has audio and video"""
+        return bool(self.effective_layer & Layer.AV)
 
     @property
     def flags(self) -> set[ClipFlags]:
@@ -130,37 +301,24 @@ class Clip(metaclass=ABCMeta):
         return {ClipFlags.HasMissingResources}
 
     @property
-    def video_fps(self) -> Optional[FPS]:
-        return self._video_fps
-
-    @property
-    def duration(self) -> float:
+    def duration(self) -> Optional[float]:
         """
         Duration in seconds which should be fixed.
         Could be overridden and calculated on demand. Cache it if possible.
         :return: Length of the Clip in seconds
         """
-        return 0.
-
-    @property
-    def video_resolution(self) -> Optional[tuple[int, int]]:
-        """
-        Returns a resolution if known by Clip
-        :return: tuple(width, height)
-        """
+        # ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 input.mp4
         return None
 
-    # Too ambigious
-    # def __len__(self):
-    #     """
-    #     A plain Clip instance is quite useless. Most Clip subclasses represent 1 clip if not even more.
-    #     This is not the duration or frame count!
-    #     """
-    #     return 0 if type(self) is Clip else 1
+    def metrics(self, with_base_defaults=True) -> dict[str, Any]:
+        if with_base_defaults:
+            return self._default_metrics or {}
+        else:
+            return {}
 
     def __hash__(self):
         """Hash based on repr. Not safe as permanent caching key"""
-        return hash(repr(self))
+        return hash(self.definition_str)
 
     def __add__(self, other: "Clip"):
         """
@@ -182,76 +340,47 @@ class Clip(metaclass=ABCMeta):
             raise ValueError("count must be at least 1")
         return RepeatClip(self, count)
 
-    def __getitem__(self, item):
-        # TODO Rethink?
-        if isinstance(item, int):
-            pass  # get a frame by framenumber
+    @overload
+    def __getitem__(self, _pos: float) -> Frame:
+        """
+        Returns a still image from within the video clip
+        :param _pos: Position in seconds within the Clip
+        :return: A still image
+        """
 
-        if isinstance(item, float):
-            pass  # get a frame at second
+    @overload
+    def __getitem__(self, _range: slice) -> Clip:
+        pass
 
-        if isinstance(item, (slice, tuple)):
-            from scriptycut.slice import Slice
-            return Slice(self, item)
+    def __getitem__(self, pos_or_range):
+        pass
 
     # def transform(self, options: str) -> "Clip":
     #     # TODO Basic transformations
     #     from scriptycut.transform import Transform
     #     return Transform(self, options)
 
-    def overlay(self, other_overlay_clip: "Clip", options) -> "Clip":
-        # TODO Overlays with clips
-        from scriptycut.overlay import Overlay
-        return Overlay(self, other_overlay_clip, options)
-
-    def scale(self,
-              width: int = None, height: int = None,
-              keep_aspect=True, center=True, custom: str = None):
-        """
-        Scales a Clip.
-        Helper/wrapper function using transform()
-        :param width:
-        :param height:
-        :param keep_aspect: Keep aspect ratio of clips. Add black bars.
-        :param center:
-        :param custom:
-        :return:
-        """
-
-        from scriptycut.transform import Scale
-        return Scale(self, width, height, keep_aspect, center, custom)
-
-    def ffmpeg_args(self) -> FFArgsInterface:
-        """
-        Create command line arguments for the ffmpeg call representing the clip function.
-        :return: FFArgs instance or iterable of it
-        """
-
-    def render_cache(self, force_update_existing=False):
-        if not self.CACHE_ENABLE:
-            return
-
-        if self._cached and not force_update_existing:
-            # The Clip is already cached
-            return
-
-        if self.has_video:
-            cached_video_file = self.cachedir / "video.ffv1"
-        if self.has_audio:
-            cached_audio_file = self.cachedir / "audio.wav"  # or flac
-
-        self.render()
-        self._cached = True
-
-    def render(self, file: Pathlike, **encoding_kwargs):
-        # TODO: Render interface, format incompatibility handling
-        input_args = ()
-        output_args = ()
-
-        f = FFMPEG()
-        render_thread = f.run_threaded(self.cachedir, *input_args, *output_args, file)
-        render_thread.join_if_alive()
-        # -progress progressinfo.txt
+    # def overlay(self, other_overlay_clip: "Clip", options) -> "Clip":
+    #     # TODO Overlays with clips
+    #     from scriptycut.overlay import Overlay
+    #     return Overlay(self, other_overlay_clip, options)
+    #
+    # def scale(self,
+    #           width: int = None, height: int = None,
+    #           keep_aspect=True, center=True, custom: str = None):
+    #     """
+    #     Scales a Clip.
+    #     Helper/wrapper function using transform()
+    #     :param width:
+    #     :param height:
+    #     :param keep_aspect: Keep aspect ratio of clips. Add black bars.
+    #     :param center:
+    #     :param custom:
+    #     :return:
+    #     """
+    #
+    #     from scriptycut.transform import Scale
+    #     return Scale(self, width, height, keep_aspect, center, custom)
 
     def iter_sequenced_clips(self) -> Generator["Clip", None, None]:
         """
@@ -270,72 +399,52 @@ class Clip(metaclass=ABCMeta):
         """
         yield self
 
-    def debug(self, msg):
-        pass
-
-    def info(self, msg):
-        pass
-
-    def warn(self, msg):
-        pass
-
-    def err(self, msg):
-        pass
-
     @property
     def av_info_str(self) -> str:
         """Quick stream present indication (if not [AV]): [A], [V], [Missing]"""
-        if ClipFlags.HasVideo in self.flags and ClipFlags.HasAudio in self.flags:
+        if ClipFlags.HasMissingResources in self.flags:
+            return "[Incomplete]"
+
+        if self.effective_layer is Layer.AV:
             return ""  # Audio + Video is default, so omit
 
-        if ClipFlags.HasVideo in self.flags:
+        if self.effective_layer is Layer.V:
             return "[V]"
 
-        if ClipFlags.HasAudio in self.flags:
+        if self.effective_layer is Layer.A:
             return "[A]"
-
-        if ClipFlags.HasMissingResources in self.flags:
-            return "[Missing]"
 
         return "[NonAV]"
 
-    @abstractmethod
-    def _repr_data(self) -> str:
-        """
-        Clips are immutable for caching.
-        Always reflect all settings for a subclass instance into this function.
-        """
-        return "[useless empty clip]"
-
     def __repr__(self):
-        return f"<{self._autoname}{self.av_info_str}:{self._repr_data()}>"
+        return self.definition_str_full
 
-
-class InputClip(Clip, metaclass=ABCMeta):
-    """
-    These Clip input derivates don't really need caching (hence they're a plain file probably).
-    Also the render process should integrate these sources directly as input arguments of the next
-    ffmpeg processing command.
-    """
-    CACHE_ENABLE = False  # We're probably reading from a file source etc. anyway, so caching would be unnecessary.
+    @property
+    def definition_str_full(self) -> str:
+        return f"{self.__class__.__name__}({self.definition_str})[{self.av_info_str}]"
 
 
 class ClipSequence(Clip):
     """
     """
-
     auto_flatten = True  # Should be True by default. Else clip1 + clip2 + clip3 creates a tree structure.
 
     def __init__(self, clips: Iterable[Clip], auto_flatten: bool = None):
         if auto_flatten or (auto_flatten is None and self.auto_flatten):
-            self._clips = tuple(self._flatten_subclips(clips))
+            self._clips: tuple[Clip, ...] = tuple(self._flatten_subclips(clips))
         else:
-            self._clips = tuple(clips)
+            self._clips: tuple[Clip, ...] = tuple(clips)
 
         if len(self._clips) == 0:
             raise ValueError("Empty ClipSequences are not allowed.")
 
         Clip.__init__(self)
+
+    def audio(self) -> Optional["Clip"]:
+        pass  # TODO
+
+    def video(self) -> Optional["Clip"]:
+        pass  # TODO
 
     @staticmethod
     def _flatten_subclips(clips: Iterable[Clip]):
@@ -352,34 +461,31 @@ class ClipSequence(Clip):
         return ClipFlags.merge_from_clips(self._clips, append=ClipFlags.HasSequence)
 
     @functools.cached_property
-    def duration(self) -> float:
-        return sum(c.duration for c in self._clips)
+    def duration(self) -> Optional[float]:
+        total_duration = 0.
+        for c in self._clips:
+            duration = c.duration
+            if duration is None:
+                # If one duration is unknown, the sum is unknown tooo.
+                return None
+            total_duration = total_duration + duration
+
+        return total_duration
 
     def match_resolutions(self,
-                          width: int = None, height: int = None,
-                          from_master=False, keep_aspect=True, center=True, custom: str = None):
+                          resolution: VideoResolution = None,
+                          keep_aspect=True, center=True, custom: str = None):
         """
         Scales and fits a ClipSequence equally to a common resolution.
         Helper/wrapper function using transform()
-        :param width:
-        :param height:
-        :param from_master: Use width and height from a containing master clip.
-        :param keep_aspect: Keep aspect ratio of clips. Add black bars.
+        :param resolution: A specific resolution for the video.
+        :param keep_aspect: Keep aspect ratio of clips. Add letterboxing if needed.
         :param center:
         :param custom:
         :return:
         """
 
-        if from_master:
-            if ClipFlags.ContainsMasterClip not in self.flags:
-                raise RuntimeError("from_master requires one subclip clip to be flagged as master.")
-
-            master_clips = tuple(c for c in self.iter_sequenced_clips() if ClipFlags.IsMasterClip)
-            if not master_clips:
-                raise RuntimeError("No master clip found.")
-
-
-        from scriptycut.transform import Scale
+        from scriptycut.clips.transform import Scale
 
         scaled_clips = []
         for c in self.iter_sequenced_clips():
@@ -399,13 +505,14 @@ class ClipSequence(Clip):
         yield from chain.from_iterable(c.iter_all_clips() for c in self._clips)
         yield self  # Yield the sequence also at last.
 
-    def _repr_data(self) -> str:
-        return f"⇻{self._clips}"
+    @property
+    def definition_str(self) -> str:
+        return repr(self._clips)
 
 
 class RepeatClip(ClipSequence):
     def __init__(self, clip: Clip, count: int):
-        if not isinstance(count, int) or count<1:
+        if not isinstance(count, int) or count < 1:
             raise ValueError("Count must be int >= 1")
 
         self._clip = clip
@@ -425,20 +532,33 @@ class RepeatClip(ClipSequence):
         yield from self._clip.iter_all_clips()  # Yields self._clip already
         yield self
 
-    def _repr_data(self) -> str:
+    @property
+    def definition_str(self) -> str:
         return f"{self._count}×{self._clip!r}"
 
 
-class Libavfilter(InputClip):
+class Libavfilter(Clip):
     """
     Create clips by ffmpeg's lavfi device
     https://ffmpeg.org/ffmpeg-devices.html#Examples-5
     """
-    def __init__(self, filtergraph: str, duration: float):
+
+    @property
+    def definition_str(self) -> str:
+        return repr((self._inputs, self._filtergraph))
+
+    def __init__(self, filtergraph: str, duration: float, inputs: Clip | Iterable[Clip]):
         self._filtergraph = filtergraph
         self._duration = duration
+        self._inputs = inputs
 
-        InputClip.__init__(self)
+        Clip.__init__(self)
+
+    def audio(self) -> Optional["Clip"]:
+        pass  # TODO
+
+    def video(self) -> Optional["Clip"]:
+        pass  # TODO
 
     @property
     def duration(self) -> float:

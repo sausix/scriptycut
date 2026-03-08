@@ -5,18 +5,17 @@ from pathlib import Path
 from typing import Optional
 from functools import cached_property
 
-from scriptycut.clip import InputClip
-from scriptycut.common import Pathlike
+from scriptycut.clip import Clip
+from scriptycut.common import Pathlike, Layer
 from scriptycut.formats import VideoFormat, AudioFormat
 from scriptycut.fftools import FFPROBE
-from scriptycut.ffinterface import FFargInput
 from scriptycut.clipflags import ClipFlags
 
 
 ffprobe = FFPROBE()
 
 
-class FileClip(InputClip):
+class FileClip(Clip):
     """
     Clip based on a file on disk.
     """
@@ -38,22 +37,30 @@ class FileClip(InputClip):
         """
 
         self._sourcefile = Path(sourcefile)
-
-        probe_res = ffprobe.probe(sourcefile, raise_error=False)  # File may be missing or not
-        data = {} if probe_res is None else loads(probe_res)
+        probe_info = self.cachedir / "probe.txt"
 
         if self._sourcefile.is_file():
+            # File exists
             stat_info = self._sourcefile.stat()
             self._filemoddate = stat_info.st_mtime_ns
             self._filesize = stat_info.st_size
+            probe_res = ffprobe.probe(sourcefile, raise_error=False)
+            probe_info.write_text(probe_res or "Probe failed.")
+            data = probe_res and loads(probe_res) or {}
+
         else:
+            # Missing source file
             self._filemoddate = 0
             self._filesize = 0
+            probe_info.write_text("File was missing.")
+            data = {}
 
         self._format: dict = data.get("format", {})
         self._all_streams = tuple(data.get("streams", ()))
-        self._video_streams = tuple(s for s in self._all_streams if s.get("codec_type", None) == "video")
-        self._audio_streams = tuple(s for s in self._all_streams if s.get("codec_type", None) == "audio")
+        self._video_streams: tuple[dict, ...] = tuple(s for s in self._all_streams if isinstance(s, dict) and s.get("codec_type", None) == "video")
+        self._audio_streams: tuple[dict, ...] = tuple(s for s in self._all_streams if isinstance(s, dict) and s.get("codec_type", None) == "audio")
+
+        # Is master clip
         self._master = master
 
         # Find specified streams
@@ -70,10 +77,37 @@ class FileClip(InputClip):
         if found_audio:
             self._audio_format = AudioFormat.from_stream_info(self._audio_streams[audio_streamindex])
 
-        InputClip.__init__(self)
+        if found_video and found_audio:
+            layer = Layer.AV
+        elif found_video :
+            layer = Layer.V
+        elif found_audio:
+            layer = Layer.A
+        else:
+            layer = Layer.NONE
+        Clip.__init__(self, only_layer=layer)
 
-        probe_info = self.cachedir / "probe.txt"
-        probe_info.write_text(probe_res or "")
+    def video(self) -> Optional["Clip"]:
+        if self.effective_layer == Layer.V:
+            # It's pure video already
+            return self
+
+        if self.effective_layer == Layer.AV:
+            # Split stream from AV
+            return FileClip(self._sourcefile, video_streamindex=self._video_streamindex, master=self._master)
+
+        return None
+
+    def audio(self) -> Optional["Clip"]:
+        if self.effective_layer == Layer.A:
+            # It's pure audio already
+            return self
+
+        if self.effective_layer == Layer.AV:
+            # Split stream from AV
+            return FileClip(self._sourcefile, audio_streamindex=self._video_streamindex, master=self._master)
+
+        return None
 
     def sourcefile(self) -> Path:
         return self._sourcefile
@@ -98,10 +132,13 @@ class FileClip(InputClip):
     def all_streams_info(self) -> tuple[dict, ...]:
         return self._all_streams
 
-    @cached_property
-    def duration(self) -> float:
+    @property
+    def duration(self) -> Optional[float]:
         # Get from format/container
-        return float(self._format.get("duration", 0.))
+        dur_info = self._format.get("duration")
+        if isinstance(dur_info, float):
+            return dur_info
+        return None
 
     @cached_property
     def flags(self) -> set[ClipFlags]:
@@ -122,7 +159,7 @@ class FileClip(InputClip):
 
         return f
 
-    def _repr_data(self) -> str:
+    def unique_repr_str(self) -> str:
         extra = ""
 
         if self.has_video and self._video_streamindex != 0:

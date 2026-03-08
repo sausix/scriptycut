@@ -46,5 +46,5 @@ ffmpeg -f x11grab -video_size 1680x1050 -framerate 30 -i :0.0 \
     def clip_top(self) -> Clip:
         return self.__clip_top
 
-    def _repr_data(self) -> str:
+    def unique_repr_str(self) -> str:
         return f"{self.__clip_bottom}↙↗{self.__clip_top}:{self.__options}"

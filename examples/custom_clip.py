@@ -15,17 +15,16 @@ How to write a custom Clip subclass with step by step explanations.
 
 # TODO: Usable example?
 
-from typing import Set
+from typing import Set, Optional
 from collections.abc import Generator
 from functools import cached_property
 
 from scriptycut.clip import Clip
-from scriptycut.cache import ClipCachePref
 from scriptycut.clipflags import ClipFlags
 
 
 class MyCustomClip(Clip):
-    def __init__(self, other_clip: Clip, my_options, cachepref=ClipCachePref.DEPENDS_ASK_INSTANCE):
+    def __init__(self, other_clip: Clip, my_options):
         """
         Each Clip subclass provides individual creation or
         transforming video clips or single media streams.
@@ -45,18 +44,22 @@ class MyCustomClip(Clip):
         self._other_clip = other_clip
         self._my_options = my_options
 
-
-        # cachepref is optional as input argument.
         # Expose it if the user should choose the cache preference for each instance individually.
         # The upper Clip class magic handles the cachepref. Just pass a preference what suits
         # best for your class (or let the user choose).
-        Clip.__init__(self, cachepref)
+        Clip.__init__(self)
 
         # After Clip.__init__() you can access the cache folder and:
         # - Do some further checks
         # - Save some meta or log into it
         # - Everything except heavy operations like encoding.
-        print(self.cachedir)
+        print(self.cache_dir)
+
+    def audio(self) -> Optional["Clip"]:
+        pass  # TODO
+
+    def video(self) -> Optional["Clip"]:
+        pass  # TODO
 
     @property
     def flags(self) -> Set[ClipFlags]:
@@ -88,9 +91,10 @@ class MyCustomClip(Clip):
         yield from self._other_clip.iter_all_clips()  # Yield _other_clip's subclips and itself
         yield self  # At last yield this instance.
 
-    def _repr_data(self) -> str:
+    @property
+    def definition_str(self) -> str:
         # Required function to generate the unique id for the instance.
         # It's called as last part in __repr__():
         #  f"<{self.__class__.__name__}{self.av_info_str}:{self._repr_data()}>"
         # Returm a simple human readable string.
-        return f"{self._other_clip}:{self._my_options}"
+        return f"{self._other_clip!r}:{self._my_options}"

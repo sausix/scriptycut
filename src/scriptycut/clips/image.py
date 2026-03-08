@@ -95,7 +95,7 @@ class ImageClip(Clip):
     def video_resolution(self) -> Optional[Tuple[int, int]]:
         return self._image.size
 
-    def _repr_data(self) -> str:
+    def unique_repr_str(self) -> str:
         return f"{self._duration}s:{self._image!r}"
 
 
@@ -115,7 +115,7 @@ class ImageSequenceClip(Clip):
     def flags(self) -> Set[ClipFlags]:
         return {ClipFlags.HasVideo}
 
-    def _repr_data(self) -> str:
+    def unique_repr_str(self) -> str:
         return f"{self._duration_each}s@{self._images!r}"
 
     @cached_property
